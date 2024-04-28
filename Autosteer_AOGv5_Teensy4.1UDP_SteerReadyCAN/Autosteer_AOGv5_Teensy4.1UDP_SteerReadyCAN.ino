@@ -74,12 +74,12 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 18.02.2024");
   #define PWM1_LPWM  3  //PD3
 
   //Not Connected for Cytron, Right PWM for IBT2
-  #define PWM2_RPWM  9 //D9
+  #define PWM2_RPWM  7 //D9
 
   //--------------------------- Switch Input Pins ------------------------
-  #define STEERSW_PIN 6 //PD6
-  #define WORKSW_PIN 7  //PD7
-  #define REMOTE_PIN 8  //PB0
+  #define STEERSW_PIN 9 //PD6
+  #define WORKSW_PIN 8  //PD7
+  #define REMOTE_PIN 10  //PB0
 
   #define CONST_180_DIVIDED_BY_PI 57.2957795130823
   #define RAD_TO_DEG_X_10 572.95779513082320876798154814105
@@ -104,7 +104,7 @@ elapsedMillis tempChecker;
     struct ConfigIP {
         uint8_t ipOne = 192;
         uint8_t ipTwo = 168;
-        uint8_t ipThree = 1;
+        uint8_t ipThree = 5;
     };  ConfigIP networkAddress;   //3 bytes
   
   // Module IP Address / Port
@@ -127,6 +127,7 @@ elapsedMillis tempChecker;
   EthernetUDP Udp;
   EthernetUDP NtripUdp;         
 
+
 //----Teensy 4.1 Ethernet--End---------------------
 
 //----Teensy 4.1 CANBus--Start---------------------
@@ -136,11 +137,11 @@ FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_256> K_Bus;    //Tractor / Control Bus
 FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_256> ISO_Bus;  //ISO Bus
 FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_256> V_Bus;    //Steering Valve Bus
 
-#define ledPin 5        //Option for LED, CAN Valve Ready To Steer.
-#define engageLED 24    //Option for LED, to see if Engage message is recived.
+#define ledPin 11        //Option for LED, CAN Valve Ready To Steer.
+#define engageLED 16    //Option for LED, to see if Engage message is recived.
 
 uint8_t Brand = 1;              //Variable to set brand via serial monitor.
-uint8_t gpsMode = 1;            //Variable to set GPS mode via serial monitor.
+uint8_t gpsMode = 3;            //Variable to set GPS mode via serial monitor.
 uint8_t CANBUS_ModuleID = 0x1C; //Used for the Module CAN ID
 
 bool reverse_MT = 0;
@@ -539,6 +540,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       Serial.print(speedCheck);
       Serial.println(" Micros, Done...");
 */
+
   }
 // End of Setup
 
@@ -815,7 +817,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
             if ( lastEnc) EncoderFunc();
           }
         }
-      
+ 
   } // end of main loop
 
 //********************************************************************************
