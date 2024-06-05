@@ -1,3 +1,25 @@
+#include "wit_c_sdk.h"
+#include "REG.h"
+
+static volatile char s_cDataUpdate = 0, s_cCmd = 0xff; 
+static void SensorUartSend(uint8_t *p_data, uint32_t uiSize);
+static void SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum);
+static void Delayms(uint16_t ucMs);
+
+#define ACC_UPDATE		0x01
+#define GYRO_UPDATE		0x02
+#define ANGLE_UPDATE	0x04
+#define MAG_UPDATE		0x08
+#define READ_UPDATE		0x80
+
+#define WITSerial Serial7
+
+int i;
+float fAcc[3], fGyro[3], fAngle[3];
+uint32_t LASTPRINT = 0;
+float WITHeading = 0;
+float WITRoll = 0;
+
 // Conversion to Hexidecimal
 const char* asciiHex = "0123456789ABCDEF";
 
@@ -91,7 +113,7 @@ void GGA_Handler() //Rec'd GGA
        BuildNmea();           //Build & send data GPS data to AgIO
     }
 
-    else if (useBNO08xRVC)
+    else if (useBNO08xRVC || useWIT901)
     {
         BuildNmea();           //Build & send data GPS data to AgIO
     }
@@ -277,7 +299,7 @@ void BuildNmea(void)
 
     strcat(nmea, "\r\n");
 
-
+//    Serial.println(nmea);
     //off to AOG
     int len = strlen(nmea);
     Udp.beginPacket(ipDestination, 9999);
@@ -402,3 +424,190 @@ void CalculateChecksum(void)
     010.2,K      Ground speed, Kilometers per hour
      48          Checksum
 */
+
+
+static void AutoScanSensor(void)
+{
+	int i, iRetry;
+  const uint32_t c_uiBaud[8] = {0,4800, 9600, 19200, 38400, 57600, 115200, 230400};
+	
+	for(i = 0; i < sizeof(c_uiBaud)/sizeof(c_uiBaud[0]); i++)
+	{
+    Serial.print("Scan on Serial 1 with baud: ");
+    Serial.println(c_uiBaud[i]);
+		WITSerial.begin(c_uiBaud[i]);
+    WITSerial.flush();
+    for(int i = 0 ; i < 100; i++) {
+       WITSerial.write('AA');
+       delay(50);
+    }
+    WITSerial.flush();
+    Serial.println("WITSerial flushed");
+		iRetry = 2;
+		s_cDataUpdate = 0;
+		do
+		{
+			WitReadReg(AX, 3);
+			delay(200);
+      while (WITSerial.available())
+      {
+        WitSerialDataIn(WITSerial.read());
+      }
+			if(s_cDataUpdate != 0)
+			{
+				Serial.print(c_uiBaud[i]);
+				Serial.print(" baud find sensor\r\n\r\n");
+				return ;
+			}
+			iRetry--;
+		}while(iRetry);		
+	}
+	Serial.print("can not find sensor\r\n");
+	Serial.print("please check your connection\r\n");
+}
+
+void WIT901Setup(){
+  WitInit(WIT_PROTOCOL_NORMAL, 0x50);
+	WitSerialWriteRegister(SensorUartSend);
+	WitRegisterCallBack(SensorDataUpdata);
+  WitDelayMsRegister(Delayms);
+//  delay(500);
+//    AutoScanSensor(); 
+
+  //Serial7.begin(0,  SERIAL_8N1, 16, 17);
+  WITSerial.begin(9600);
+  WITSerial.flush();
+
+  WitReadReg(AX, 3);
+	delay(200);
+  while(WITSerial.available()){
+    WitSerialDataIn(WITSerial.read());
+  }
+  if(s_cDataUpdate != 0) {
+		Serial.print("9600 baud find sensor\r\n\r\n");
+    useWIT901 = true;
+
+  Serial.println("Setting up Sensor!");
+  WitWriteReg(KEY, KEY_UNLOCK);   delay(20);
+  WitWriteReg(AXIS6, 0x01);       delay(20);
+  WitWriteReg(SAVE, SAVE_PARAM);  delay(20);
+  WitWriteReg(KEY, KEY_UNLOCK);   delay(20);
+  WitWriteReg(ACCFILT, 100);      delay(20);
+  WitWriteReg(SAVE, SAVE_PARAM);  delay(20);
+
+  WitReadReg(ACCFILT, 3);      delay(20);
+  WitReadReg(AXIS6, 3);        delay(20);
+  Serial.print("ACCFILT: ");
+  Serial.println(sReg[ACCFILT]);
+  Serial.print(" sRegAxis6:");
+  Serial.println(sReg[AXIS6]);
+  
+  WitSetBandwidth(BANDWIDTH_21HZ); delay(20);
+  WitSetOutputRate(RRATE_20HZ);  delay(20);
+//  WitSetBandwidth(BANDWIDTH_94HZ); delay(20);
+//  WitSetOutputRate(RRATE_100HZ);  delay(20);
+  WitSetContent(RSW_ANGLE);  delay(20);
+
+  delay(300);
+      Serial.print("%%%%%%%      ACCFILT: ");
+      Serial.print(sReg[ACCFILT]);
+      Serial.print("   sRegAxis6: ");
+      Serial.println(sReg[AXIS6]);
+  } else {
+    Serial.println("WIT901 is not found!!!");
+  }
+}
+
+void WIT901Debug() {
+    if( millis() > LASTPRINT + 5000){
+    LASTPRINT = millis();
+      WitReadReg(ACCFILT, 3);
+      WitReadReg(AXIS6, 3);
+      Serial.print(millis());
+      Serial.print("%%%%%%%      ACCFILT: ");
+      Serial.print(sReg[ACCFILT]);
+      Serial.print("   sRegAxis6: ");
+      Serial.print(sReg[AXIS6]);
+      Serial.print("WITRoll: ");
+      Serial.print(WITRoll, 3);
+      Serial.print("WITHeading: ");
+      Serial.println(WITHeading, 3);
+  }
+}
+
+void WIT901Parse() {
+  while(WITSerial.available()){
+    WitSerialDataIn(WITSerial.read());
+  }
+  WIT901Debug();
+  	if(s_cDataUpdate)
+		{
+			for(i = 0; i < 3; i++)
+			{
+				fAcc[i] = sReg[AX+i] / 32768.0f * 16.0f;
+				fGyro[i] = sReg[GX+i] / 32768.0f * 2000.0f;
+				fAngle[i] = sReg[Roll+i] / 32768.0f * 180.0f;
+			}
+      if(s_cDataUpdate & ANGLE_UPDATE)
+			{
+//				Serial.print("WITanglePitch:");
+//				Serial.print(fAngle[0], 3);
+//				Serial.print(" WITRoll:");
+        if(steerConfig.IsUseY_Axis)
+          WITRoll = (fAngle[1]*10)-16;
+        else
+          WITRoll = (fAngle[0]*10)-16;
+//				Serial.print(WITRoll, 3);
+//				Serial.print(" WITHeading:");
+        WITHeading = fAngle[2]*-10;
+        if(WITHeading < 0 && WITHeading >= -1800) WITHeading += 3600;
+//				Serial.print(WITHeading, 3);
+//				Serial.print("\r\n");
+				s_cDataUpdate &= ~ANGLE_UPDATE;
+
+        itoa(WITHeading, imuHeading, 10);
+        itoa(WITRoll, imuRoll, 10);
+        // YawRate - 0 for now
+        itoa(0, imuYawRate, 10);
+
+			}
+      s_cDataUpdate = 0;
+		}
+}
+
+static void SensorUartSend(uint8_t *p_data, uint32_t uiSize)
+{
+  WITSerial.write(p_data, uiSize);
+  WITSerial.flush();
+}
+static void Delayms(uint16_t ucMs)
+{
+  delay(ucMs);
+}
+static void SensorDataUpdata(uint32_t uiReg, uint32_t uiRegNum)
+{
+	int i;
+    for(i = 0; i < uiRegNum; i++)
+    {
+        switch(uiReg)
+        {
+            case AZ:
+				s_cDataUpdate |= ACC_UPDATE;
+            break;
+            case GZ:
+				s_cDataUpdate |= GYRO_UPDATE;
+            break;
+            case HZ:
+				s_cDataUpdate |= MAG_UPDATE;
+            break;
+            case Yaw:
+				s_cDataUpdate |= ANGLE_UPDATE;
+            break;
+            default:
+				s_cDataUpdate |= READ_UPDATE;
+			break;
+        }
+		uiReg++;
+    }
+}
+

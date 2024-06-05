@@ -3,8 +3,8 @@
 char rxbuffer[512];         //Extra serial rx buffer
 char txbuffer[512];         //Extra serial tx buffer
 
-#define RadioRTK Serial7
-#define RadioBaudRate 115200
+//#define RadioRTK Serial7
+#define RadioBaudRate 9600
 char RTKrxbuffer[512];      //Extra serial rx buffer
 
 char nmeaBuffer[200];
@@ -22,8 +22,8 @@ void GPS_setup()
   GPS.addMemoryForRead(rxbuffer, 512);
   GPS.addMemoryForWrite(txbuffer, 512);
 
-  RadioRTK.begin(RadioBaudRate);
-  RadioRTK.addMemoryForRead(RTKrxbuffer, 512);
+//  RadioRTK.begin(RadioBaudRate);
+//  RadioRTK.addMemoryForRead(RTKrxbuffer, 512);
 
   // the dash means wildcard
   parser.setErrorHandler(errorHandler);
@@ -105,7 +105,7 @@ void Read_IMU()
 void Panda_GPS()
 {
     while (GPS.available())
-    {
+    { 
         parser << GPS.read();
     }
 }
@@ -153,10 +153,10 @@ void Forward_Ntrip()
     }
 
 //Check for Radio RTK
-    if (RadioRTK.available())
-    {
-        GPS.write(RadioRTK.read());
-    }
+//    if (RadioRTK.available())
+//    {
+//        GPS.write(RadioRTK.read());
+//    }
 }
     
 //-------------------------------------------------------------------------------------------------
