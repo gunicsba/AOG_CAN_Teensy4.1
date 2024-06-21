@@ -68,9 +68,14 @@ if (Brand == 9) {
     V_Bus.setFIFOFilter(0, 0x0CEFFF76, EXT);  //Cat MTxxx Curve data, valve state and engage messages
     CANBUS_ModuleID = 0x2C;
 }
+if (Brand == 10) {
+    V_Bus.setFIFOFilter(0, 0x05800001, EXT);  //Keya Curve data
+    V_Bus.setFIFOFilter(0, 0x7000001, EXT); //Heartbeat, encoder, speed, current, error
+    CANBUS_ModuleID = 0x2C;
+}
   
 // Claim V_Bus Address 
-if (Brand >= 0 && Brand <= 9){
+if (Brand >= 0 && Brand <= 10){
   CAN_message_t msgV;
   if (Brand == 0) msgV.id = 0x18EEFF1E;       //Claas
   else if (Brand == 1) msgV.id = 0x18EEFF1C;  //Massey, Valtra, ETC
@@ -82,8 +87,43 @@ if (Brand >= 0 && Brand <= 9){
   else if (Brand == 7) msgV.id = 0x18EEFF1C;  //AgOpenGPS
   else if (Brand == 8) msgV.id = 0x18EEFF1C;  //Cat MTxxx Late
   else if (Brand == 9) msgV.id = 0x18EEFF2C;  //Cat MTxxx Early
+  else if (Brand == 10)msgV.id = 0x06000001; //Keya
   msgV.flags.extended = true;
   msgV.len = 8;
+  if(Brand == 10 ) {
+       //Absolute Position
+    msgV.buf[0] = 0x03;   
+    msgV.buf[1] = 0x0D;
+    msgV.buf[2] = 0x20;
+    msgV.buf[3] = 0x31;
+    msgV.buf[4] = 0x00;
+    msgV.buf[5] = 0x00;
+    msgV.buf[6] = 0x00;
+    msgV.buf[7] = 0x00;
+    V_Bus.write(msgV);
+    delay(100);
+           //Zero Encoder Position 
+    msgV.buf[0] = 0x23;   
+    msgV.buf[1] = 0x0C;
+    msgV.buf[2] = 0x20;
+    msgV.buf[3] = 0x09;
+    msgV.buf[4] = 0x00;
+    msgV.buf[5] = 0x00;
+    msgV.buf[6] = 0x00;
+    msgV.buf[7] = 0x00;
+    V_Bus.write(msgV);
+    //Disable command 
+    msgV.buf[0] = 0x23;   
+    msgV.buf[1] = 0x0C;
+    msgV.buf[2] = 0x20;
+    msgV.buf[3] = 0x01;
+    msgV.buf[4] = 0x00;
+    msgV.buf[5] = 0x00;
+    msgV.buf[6] = 0x00;
+    msgV.buf[7] = 0x00;
+    delay(100);
+    V_Bus.write(msgV);
+  } 
   msgV.buf[0] = 0x00;
   msgV.buf[1] = 0x00;
   msgV.buf[2] = 0xC0;
@@ -92,7 +132,10 @@ if (Brand >= 0 && Brand <= 9){
   msgV.buf[5] = 0x17;
   msgV.buf[6] = 0x02;
   msgV.buf[7] = 0x20;
+
+
   V_Bus.write(msgV);
+  
 }
 delay(500);
 
@@ -318,6 +361,40 @@ else if (Brand == 7){
         VBusSendData.buf[7] = 255;
         V_Bus.write(VBusSendData);
     }
+    else if (Brand == 10)
+    {
+        VBusSendData.id = 0x06000001;
+        VBusSendData.flags.extended = true;
+        VBusSendData.len = 8;
+        
+        //engage or disengage
+        VBusSendData.buf[0] = 0x23;
+        if (intendToSteer == 1) VBusSendData.buf[1] = 0x0D;
+        if (intendToSteer == 0) VBusSendData.buf[1] = 0x0C;
+        VBusSendData.buf[2] = 0x20;
+        VBusSendData.buf[3] = 0x01;
+        VBusSendData.buf[4] = 0x00;
+        VBusSendData.buf[5] = 0x00;
+        VBusSendData.buf[6] = 0x00;
+        VBusSendData.buf[7] = 0x00;
+        V_Bus.write(VBusSendData);
+        //WAS Query
+        VBusSendData.buf[0] = 0x40;
+        VBusSendData.buf[0] = 0x04;
+        VBusSendData.buf[2] = 0x21;
+        //rest buf[] is same as above
+        V_Bus.write(VBusSendData);
+          
+        //Steering
+        VBusSendData.buf[0] = 0x23;
+        VBusSendData.buf[1] = 0x02;
+        VBusSendData.buf[2] = 0x20;
+        VBusSendData.buf[4] = highByte(setCurve);
+        VBusSendData.buf[5] = lowByte(setCurve);
+        //buf 3-6-7 same as above!
+        V_Bus.write(VBusSendData);
+        
+    }    
 }
 
 //---Receive V_Bus message
@@ -625,6 +702,26 @@ void VBus_Receive()
             }
 
         }//End Brand == 9
+        else if (Brand == 10)
+        {
+              //**Keya Wheel Angle**
+              if (VBusReceiveData.id == 0x05800001)
+              {        
+                    steerAngleActual = 1000;
+                    //float(VBusReceiveData.buf[4] | (VBusReceiveData.buf[5] << 8) | (VBusReceiveData.buf[6] << 16) | (VBusReceiveData.buf[7] << 24)) / 100; 
+              }
+              else if (VBusReceiveData.id == 0x7000001)
+              {
+/*
+                if (VBusReceiveData.buf[4] == 0xFF) {
+				          currentReading = (0.9 * currentReading  ) + ( 0.1 *  (256 - VBusReceiveData.buf[5]) * 20);
+			          } else {
+				          currentReading = (0.9 * currentReading  ) + ( 0.1 * VBusReceiveData.buf[5] * 20);
+			          }
+                pwmDisplay = VBusReceiveData.buf[3]; //(and [2] too TODO)
+*/
+              }
+        }//End Brand == 10 
 
         if (ShowCANData == 1)
         {
