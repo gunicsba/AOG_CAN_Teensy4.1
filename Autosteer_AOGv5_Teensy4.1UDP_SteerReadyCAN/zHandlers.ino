@@ -52,6 +52,8 @@ char imuYawRate[6];
 // If odd characters showed up.
 void errorHandler()
 {
+  Serial.print("NMEA Parser error!!");
+  Serial.print(parser.error());
   //nothing at the moment
 }
 
@@ -475,9 +477,22 @@ void WIT901Setup(){
 //    AutoScanSensor(); 
 
   //Serial7.begin(0,  SERIAL_8N1, 16, 17);
+  
   WITSerial.begin(9600);
   WITSerial.flush();
 
+  WitReadReg(AX, 3);
+	delay(200);
+  while(WITSerial.available()){
+    WitSerialDataIn(WITSerial.read());
+  }
+  if(s_cDataUpdate != 0) {
+		Serial.print("9600 baud find sensor\r\n\r\n");
+//    Serial.print(WitSetUartBaud(WIT_BAUD_115200)); delay(20);
+//    Serial.println("Set 115200 baud");
+ //   AutoScanSensor(); 
+  }
+  s_cDataUpdate = 0;
   WitReadReg(AX, 3);
 	delay(200);
   while(WITSerial.available()){
@@ -502,11 +517,12 @@ void WIT901Setup(){
   Serial.print(" sRegAxis6:");
   Serial.println(sReg[AXIS6]);
   
-  WitSetBandwidth(BANDWIDTH_21HZ); delay(20);
-  WitSetOutputRate(RRATE_20HZ);  delay(20);
+  WitSetBandwidth(BANDWIDTH_256HZ); delay(20);
+  WitSetOutputRate(RRATE_100HZ);  delay(20);
 //  WitSetBandwidth(BANDWIDTH_94HZ); delay(20);
 //  WitSetOutputRate(RRATE_100HZ);  delay(20);
   WitSetContent(RSW_ANGLE);  delay(20);
+
 
   delay(300);
       Serial.print("%%%%%%%      ACCFILT: ");
