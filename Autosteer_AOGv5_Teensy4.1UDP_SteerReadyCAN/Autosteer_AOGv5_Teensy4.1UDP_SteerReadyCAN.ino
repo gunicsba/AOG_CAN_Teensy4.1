@@ -139,8 +139,8 @@ FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_256> V_Bus;    //Steering Valve Bus
 #define ledPin 5        //Option for LED, CAN Valve Ready To Steer.
 #define engageLED 24    //Option for LED, to see if Engage message is recived.
 
-uint8_t Brand = 1;              //Variable to set brand via serial monitor.
-uint8_t gpsMode = 1;            //Variable to set GPS mode via serial monitor.
+uint8_t Brand = 10;              //Variable to set brand via serial monitor.
+uint8_t gpsMode = 4;            //Variable to set GPS mode via serial monitor.
 uint8_t CANBUS_ModuleID = 0x1C; //Used for the Module CAN ID
 
 bool reverse_MT = 0;
@@ -510,6 +510,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       else if (Brand == 7) Serial.println("Brand = AgOpenGPS (Set Via Service Tool)");
       else if (Brand == 8) Serial.println("Brand = Cat MT Late (Set Via Service Tool)");
       else if (Brand == 9) Serial.println("Brand = Cat MT Early (Set Via Service Tool)");
+      else if (Brand == 10) Serial.println("Brand = Challenger via Keya (Set Via Service Tool)");
       else Serial.println("No Tractor Brand Set, Set Via Service Tool");
 
       Serial.println("\r\nGPS Mode:");
