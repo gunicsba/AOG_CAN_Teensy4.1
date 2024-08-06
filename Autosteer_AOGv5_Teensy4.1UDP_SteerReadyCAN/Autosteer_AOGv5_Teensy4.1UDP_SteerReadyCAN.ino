@@ -74,12 +74,12 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
   #define PWM1_LPWM  3  //PD3
 
   //Not Connected for Cytron, Right PWM for IBT2
-  #define PWM2_RPWM  9 //D9
+  #define PWM2_RPWM  11 //D9
 
   //--------------------------- Switch Input Pins ------------------------
-  #define STEERSW_PIN 6 //PD6
-  #define WORKSW_PIN 7  //PD7
-  #define REMOTE_PIN 8  //PB0
+  #define STEERSW_PIN 8 //PD6
+  #define WORKSW_PIN 9  //PD7
+  #define REMOTE_PIN 10  //PB0
 
   #define CONST_180_DIVIDED_BY_PI 57.2957795130823
   #define RAD_TO_DEG_X_10 572.95779513082320876798154814105
@@ -140,7 +140,7 @@ FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_256> V_Bus;    //Steering Valve Bus
 #define engageLED 24    //Option for LED, to see if Engage message is recived.
 
 uint8_t Brand = 1;              //Variable to set brand via serial monitor.
-uint8_t gpsMode = 1;            //Variable to set GPS mode via serial monitor.
+uint8_t gpsMode = 4;            //Variable to set GPS mode via serial monitor.
 uint8_t CANBUS_ModuleID = 0x1C; //Used for the Module CAN ID
 
 bool reverse_MT = 0;
