@@ -70,7 +70,7 @@ if (Brand == 9) {
 }
 if (Brand == 10) {
     V_Bus.setFIFOFilter(0, 0x05800001, EXT);  //Keya Curve data
-    V_Bus.setFIFOFilter(0, 0x7000001, EXT); //Heartbeat, encoder, speed, current, error
+    V_Bus.setFIFOFilter(1, 0x07000001, EXT); //Heartbeat, encoder, speed, current, error
     CANBUS_ModuleID = 0x2C;
 }
   
@@ -123,7 +123,9 @@ if (Brand >= 0 && Brand <= 10){
     msgV.buf[7] = 0x00;
     delay(100);
     V_Bus.write(msgV);
+    Serial.println("Keya CAN_Setup is done");
   } 
+  else {
   msgV.buf[0] = 0x00;
   msgV.buf[1] = 0x00;
   msgV.buf[2] = 0xC0;
@@ -135,7 +137,7 @@ if (Brand >= 0 && Brand <= 10){
 
 
   V_Bus.write(msgV);
-  
+  }
 }
 delay(500);
 
@@ -366,7 +368,6 @@ else if (Brand == 7){
         VBusSendData.id = 0x06000001;
         VBusSendData.flags.extended = true;
         VBusSendData.len = 8;
-        
         //engage or disengage
         VBusSendData.buf[0] = 0x23;
         if (intendToSteer == 1) VBusSendData.buf[1] = 0x0D;
@@ -380,20 +381,25 @@ else if (Brand == 7){
         V_Bus.write(VBusSendData);
         //WAS Query
         VBusSendData.buf[0] = 0x40;
-        VBusSendData.buf[0] = 0x04;
+        VBusSendData.buf[1] = 0x04;
         VBusSendData.buf[2] = 0x21;
-        //rest buf[] is same as above
+        VBusSendData.buf[3] = 0x01;
+        VBusSendData.buf[4] = 0x00;
+        VBusSendData.buf[5] = 0x00;
+        VBusSendData.buf[6] = 0x00;
+        VBusSendData.buf[7] = 0x00;
         V_Bus.write(VBusSendData);
-          
         //Steering
         VBusSendData.buf[0] = 0x23;
         VBusSendData.buf[1] = 0x02;
         VBusSendData.buf[2] = 0x20;
+        VBusSendData.buf[3] = 0x01;
         VBusSendData.buf[4] = highByte(setCurve);
         VBusSendData.buf[5] = lowByte(setCurve);
-        //buf 3-6-7 same as above!
+        VBusSendData.buf[6] = 0x00;
+        VBusSendData.buf[7] = 0x00;
+
         V_Bus.write(VBusSendData);
-        
     }    
 }
 
@@ -706,21 +712,33 @@ void VBus_Receive()
         {
               //**Keya Wheel Angle**
               if (VBusReceiveData.id == 0x05800001)
-              {        
-                    steerAngleActual = 1000;
-                    //float(VBusReceiveData.buf[4] | (VBusReceiveData.buf[5] << 8) | (VBusReceiveData.buf[6] << 16) | (VBusReceiveData.buf[7] << 24)) / 100; 
-              }
-              else if (VBusReceiveData.id == 0x7000001)
               {
-/*
+                if(VBusReceiveData.buf[0] == 0x60 && VBusReceiveData.buf[1] == 0x04 && VBusReceiveData.buf[2] == 0x21 && VBusReceiveData.buf[3] == 0x01) {      
+                  float wasValue = VBusReceiveData.buf[4] | (VBusReceiveData.buf[5] << 8) | (VBusReceiveData.buf[6] << 16) | (VBusReceiveData.buf[7] << 24);
+                  estCurve = wasValue + 32128;
+                  Serial.print("wasvalue: ");
+                  Serial.print(wasValue);
+                  Serial.print("Estimated curve:");
+                  Serial.println(estCurve);
+
+                }
+              }
+              else if (VBusReceiveData.id == 0x07000001)
+              {
+
                 if (VBusReceiveData.buf[4] == 0xFF) {
 				          currentReading = (0.9 * currentReading  ) + ( 0.1 *  (256 - VBusReceiveData.buf[5]) * 20);
 			          } else {
 				          currentReading = (0.9 * currentReading  ) + ( 0.1 * VBusReceiveData.buf[5] * 20);
 			          }
-                pwmDisplay = VBusReceiveData.buf[3]; //(and [2] too TODO)
-*/
+                if (VBusReceiveData.buf[2] == 0xFF) {
+                  pwmDisplay = (256 - VBusReceiveData.buf[3]); //(and [2] too TODO)
+			          } else {
+				          pwmDisplay = VBusReceiveData.buf[3]; //(and [2] too TODO)
+			          } 
+
               }
+              
         }//End Brand == 10 
 
         if (ShowCANData == 1)
