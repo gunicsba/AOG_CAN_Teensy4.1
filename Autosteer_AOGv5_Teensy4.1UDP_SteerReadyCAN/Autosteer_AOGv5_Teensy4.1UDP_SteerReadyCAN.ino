@@ -74,12 +74,12 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
   #define PWM1_LPWM  3  //PD3
 
   //Not Connected for Cytron, Right PWM for IBT2
-  #define PWM2_RPWM  9 //D9
+  #define PWM2_RPWM  11 //D9
 
   //--------------------------- Switch Input Pins ------------------------
-  #define STEERSW_PIN 6 //PD6
-  #define WORKSW_PIN 7  //PD7
-  #define REMOTE_PIN 8  //PB0
+  #define STEERSW_PIN 8 //PD6
+  #define WORKSW_PIN 9  //PD7
+  #define REMOTE_PIN 10  //PB0
 
   #define CONST_180_DIVIDED_BY_PI 57.2957795130823
   #define RAD_TO_DEG_X_10 572.95779513082320876798154814105
