@@ -365,6 +365,7 @@ else if (Brand == 7){
     }
     else if (Brand == 10)
     {
+        //Serial.print("intendToSteer: ");Serial.print(intendToSteer);Serial.print(" Curve: ");Serial.println(setCurve);
         VBusSendData.id = 0x06000001;
         VBusSendData.flags.extended = true;
         VBusSendData.len = 8;
@@ -394,13 +395,51 @@ else if (Brand == 7){
         VBusSendData.buf[1] = 0x02;
         VBusSendData.buf[2] = 0x20;
         VBusSendData.buf[3] = 0x01;
-        VBusSendData.buf[4] = highByte(setCurve);
-        VBusSendData.buf[5] = lowByte(setCurve);
-        VBusSendData.buf[6] = 0x00;
-        VBusSendData.buf[7] = 0x00;
+
+        long number = setCurve-32128;
+        number *= -10;
+
+//        Serial.print("setCurve:"); Serial.print(setCurve); 
+//        Serial.print("number:"); Serial.print(number); 
+
+
+        //50.000 is -> C350 we send as C350 0000
+        //-50.000 is -> FFFF 3CB0 but we need to send as 3CB0 FFFF
+        uint8_t data[4];
+        memcpy(data, &number, sizeof(data));
+        VBusSendData.buf[4] = data[1];
+        VBusSendData.buf[5] = data[0];
+        VBusSendData.buf[6] = data[3];
+        VBusSendData.buf[7] = data[2];
+//        Serial.print("hex:0x");
+//        Serial.print(data[1],HEX);Serial.print(data[0],HEX);Serial.print(data[3],HEX);Serial.print(data[2],HEX);
+//        Serial.println();
+        //VBusSendData.buf[4] = highByte(setCurve);
+        //VBusSendData.buf[5] = lowByte(setCurve);
+        //VBusSendData.buf[6] = 0x00;
+        //VBusSendData.buf[7] = 0x00;
 
         V_Bus.write(VBusSendData);
     }    
+}
+
+void KeyaPositionReset() {
+        delay(1000);
+        CAN_message_t VBusSendData;
+          //Serial.print("intendToSteer: ");Serial.print(intendToSteer);Serial.print(" Curve: ");Serial.println(setCurve);
+        VBusSendData.id = 0x06000001;
+        VBusSendData.flags.extended = true;
+        VBusSendData.len = 8;
+        //position reset
+        VBusSendData.buf[0] = 0x23;
+        VBusSendData.buf[1] = 0x0C;
+        VBusSendData.buf[2] = 0x20;
+        VBusSendData.buf[3] = 0x09;
+        VBusSendData.buf[4] = 0x00;
+        VBusSendData.buf[5] = 0x00;
+        VBusSendData.buf[6] = 0x00;
+        VBusSendData.buf[7] = 0x00;
+        V_Bus.write(VBusSendData);
 }
 
 //---Receive V_Bus message
@@ -715,11 +754,18 @@ void VBus_Receive()
               {
                 if(VBusReceiveData.buf[0] == 0x60 && VBusReceiveData.buf[1] == 0x04 && VBusReceiveData.buf[2] == 0x21 && VBusReceiveData.buf[3] == 0x01) {      
                   float wasValue = VBusReceiveData.buf[4] | (VBusReceiveData.buf[5] << 8) | (VBusReceiveData.buf[6] << 16) | (VBusReceiveData.buf[7] << 24);
+//-301047
+                  wasValue = wasValue/-10;
                   estCurve = wasValue + 32128;
-                  Serial.print("wasvalue: ");
+/*                  Serial.print("wasvalue: ");
                   Serial.print(wasValue);
                   Serial.print("Estimated curve:");
-                  Serial.println(estCurve);
+                  Serial.println(estCurve);*/
+                  if(currentReading <= steerConfig.PulseCountMax) {
+                    steeringValveReady = 20;
+                  } else {
+                    steeringValveReady = 0;
+                  }
 
                 }
               }
@@ -731,11 +777,32 @@ void VBus_Receive()
 			          } else {
 				          currentReading = (0.9 * currentReading  ) + ( 0.1 * VBusReceiveData.buf[5] * 20);
 			          }
+                Serial.print("PulseCountMax:");
+                Serial.print(steerConfig.PulseCountMax);
+                Serial.print(",currentReading:");
+                Serial.print(currentReading);
+                Serial.print(",hex:");
+                Serial.print(VBusReceiveData.buf[5],HEX);
+                Serial.print(" ");
+                Serial.print(VBusReceiveData.buf[4],HEX);
                 if (VBusReceiveData.buf[2] == 0xFF) {
                   pwmDisplay = (256 - VBusReceiveData.buf[3]); //(and [2] too TODO)
 			          } else {
 				          pwmDisplay = VBusReceiveData.buf[3]; //(and [2] too TODO)
 			          } 
+                Serial.print(",pwmDisplay:");
+                Serial.print(pwmDisplay);
+                Serial.print(",pwmhex:");
+                Serial.print(VBusReceiveData.buf[3],HEX);
+                Serial.print(" ");
+                Serial.print(VBusReceiveData.buf[2],HEX);
+                Serial.println();
+
+                if(currentReading <= steerConfig.PulseCountMax) {
+                  steeringValveReady = 20;
+                } else {
+                  steeringValveReady = 0;
+                }
 
               }
               

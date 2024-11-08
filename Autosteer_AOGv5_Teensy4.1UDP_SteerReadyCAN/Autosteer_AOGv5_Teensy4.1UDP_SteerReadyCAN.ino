@@ -541,6 +541,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       Serial.print(speedCheck);
       Serial.println(" Micros, Done...");
 */
+      if (Brand == 10) KeyaPositionReset();
   }
 // End of Setup
 
@@ -598,7 +599,6 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
                   currentState = 1;
                   steerSwitch = 1;
               }
-
               previousStatus = guidanceStatus;
           }
 
@@ -630,7 +630,6 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
               currentState = 1;
               previous = HIGH;
           }
-
           remoteSwitch = digitalRead(REMOTE_PIN); //read auto steer enable switch open = 0n closed = Off
           switchByte = 0;
           switchByte |= (remoteSwitch << 2);  //put remote in bit 2
