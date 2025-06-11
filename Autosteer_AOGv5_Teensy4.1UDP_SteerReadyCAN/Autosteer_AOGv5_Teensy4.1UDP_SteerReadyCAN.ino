@@ -77,8 +77,8 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
   #define PWM2_RPWM  11 //D9
 
   //--------------------------- Switch Input Pins ------------------------
-  #define STEERSW_PIN 8 //PD6
-  #define WORKSW_PIN 9  //PD7
+  #define STEERSW_PIN 32 //PD6
+  #define WORKSW_PIN 7  //PD7
   #define REMOTE_PIN 10  //PB0
 
   #define CONST_180_DIVIDED_BY_PI 57.2957795130823
@@ -356,7 +356,12 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
     pinMode(13, OUTPUT);
     
     pinMode(PWM2_RPWM, OUTPUT); 
-    
+
+    //Status LED's
+    pinMode(6, OUTPUT); digitalWrite(6, true);
+    pinMode(10, OUTPUT); digitalWrite(10, true);
+    pinMode(12, OUTPUT); digitalWrite(12, true);
+
     //set up communication
     Wire.begin();
     Serial.begin(115200);
