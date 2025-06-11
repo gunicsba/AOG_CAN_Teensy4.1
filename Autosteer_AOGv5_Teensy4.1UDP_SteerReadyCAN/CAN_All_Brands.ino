@@ -135,6 +135,10 @@ delay (500);
   K_Bus.enableFIFO();
   K_Bus.setFIFOFilter(REJECT_ALL);
 //Put filters into here to let them through (All blocked by above line)
+  if (Brand == 1){
+    K_Bus.setFIFOFilter(0, 0x18FF5806, EXT);  //Deutz Engage Message
+  } 
+
 if (Brand == 3){
   K_Bus.setFIFOFilter(0, 0x613, STD);  //Fendt Arm Rest Buttons
   } 
@@ -721,7 +725,19 @@ void K_Receive()
     CAN_message_t KBusReceiveData;
     if (K_Bus.read(KBusReceiveData)) { 
       //Put code here to sort a message out from K-Bus if needed 
-  
+      if (Brand == 1)
+      {
+        if (KBusReceiveData.id == 0x18FF5806)   //**Deutz Engage Message**  
+        {
+          if (KBusReceiveData.buf[4]==0x01) // Deutz Engage bit 4th position 01   
+          {
+              Time = millis();
+              digitalWrite(engageLED,HIGH); 
+              engageCAN = 1;
+              relayTime = ((millis() + 1000));
+          }
+        }
+      }
       if (Brand == 3)
       {
         if (KBusReceiveData.buf[0]==0x15 && KBusReceiveData.buf[2]==0x06 && KBusReceiveData.buf[3]==0xCA)
