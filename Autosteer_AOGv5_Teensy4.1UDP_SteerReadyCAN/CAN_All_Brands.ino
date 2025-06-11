@@ -137,6 +137,7 @@ delay (500);
 //Put filters into here to let them through (All blocked by above line)
   if (Brand == 1){
     K_Bus.setFIFOFilter(0, 0x18FF5806, EXT);  //Deutz Engage Message
+    K_Bus.setFIFOFilter(1, 0x8FF6206, EXT);  //Deutz joystick
   } 
 
 if (Brand == 3){
@@ -729,7 +730,7 @@ void K_Receive()
       {
         if (KBusReceiveData.id == 0x18FF5806)   //**Deutz Engage Message**  
         {
-          if (KBusReceiveData.buf[4]==0x01) // Deutz Engage bit 4th position 01   
+          if (KBusReceiveData.buf[4]&0x01) // Deutz Engage bit 4th position 01   
           {
               Time = millis();
               digitalWrite(engageLED,HIGH); 
@@ -737,6 +738,19 @@ void K_Receive()
               relayTime = ((millis() + 1000));
           }
         }
+        if (KBusReceiveData.id == 0x8FF6206)   //**Deutz joystick**  
+        {
+          //if (KBusReceiveData.buf[5]&0x01) // Comfortip Button
+          if (KBusReceiveData.buf[6]&0x01) // RPM 1
+          //if (KBusReceiveData.buf[4]&0x40) // RPM 2   
+          {
+              Time = millis();
+              digitalWrite(engageLED,HIGH); 
+              engageCAN = 1;
+              relayTime = ((millis() + 1000));
+          }
+        }
+        K_Bus.setFIFOFilter(1, 0x8FF6206, EXT);  //Deutz joystick
       }
       if (Brand == 3)
       {
@@ -800,7 +814,7 @@ void K_Receive()
           }
       }
 
-        if (ShowCANData == 1)
+        //if (ShowCANData == 1)
         {
             Serial.print(Time);
             Serial.print(", K-Bus"); 
