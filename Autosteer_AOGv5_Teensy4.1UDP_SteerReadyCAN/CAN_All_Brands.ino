@@ -750,7 +750,6 @@ void K_Receive()
               relayTime = ((millis() + 1000));
           }
         }
-        K_Bus.setFIFOFilter(1, 0x8FF6206, EXT);  //Deutz joystick
       }
       if (Brand == 3)
       {
@@ -814,7 +813,7 @@ void K_Receive()
           }
       }
 
-        //if (ShowCANData == 1)
+        if (ShowCANData == 1)
         {
             Serial.print(Time);
             Serial.print(", K-Bus"); 
