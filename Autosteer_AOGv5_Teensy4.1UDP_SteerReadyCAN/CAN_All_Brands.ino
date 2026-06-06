@@ -362,7 +362,27 @@ void VBus_Receive()
               //*****Turn saftey valve ON**********
               if (engageCAN == 1) digitalWrite(PWM2_RPWM, 1);       
             }
+
+            else if ((VBusReceiveData.buf[0]) == 27 )   //Blazs Axion 930
+            {
+              engageCAN = bitRead(VBusReceiveData.buf[1],0);
+              Time = millis();
+              digitalWrite(engageLED,HIGH); 
+              relayTime = ((millis() + 1000));
+              //*****Turn saftey valve ON**********
+              if (engageCAN == 1) digitalWrite(PWM2_RPWM, 1);       
+            }
   
+            else if ((VBusReceiveData.buf[0]) == 39 && (VBusReceiveData.buf[2]) == 243)   //Balazs Arion 650 
+            {
+              engageCAN = bitRead(VBusReceiveData.buf[1],0);
+              Time = millis();
+              digitalWrite(engageLED,HIGH); 
+              relayTime = ((millis() + 1000));
+              //*****Turn saftey valve ON**********
+              if (engageCAN == 1) digitalWrite(PWM2_RPWM, 1);       
+            }
+    
             else if ((VBusReceiveData.buf[1])== 0 && (VBusReceiveData.buf[2])== 125) //Tony Non MR Models? Ryan Mod to bit read engage bit
             {
                engageCAN = bitRead(VBusReceiveData.buf[0],2);
