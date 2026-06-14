@@ -4,7 +4,7 @@ Firmware and setup files for a Teensy 4.1 CAN-based steering controller used wit
 
 ## Video
 
-- YouTube Shorts demo: https://youtube.com/shorts/DkzHTf-jfCc?is=lRpg4t4KHVOdaWYg
+- YouTube Shorts demo: https://youtube.com/shorts/DkzHTf-jfCc
 
 ## Getting Started (Teensy 4.1 + Arduino IDE)
 
