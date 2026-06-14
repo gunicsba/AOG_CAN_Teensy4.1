@@ -1,15 +1,24 @@
-# AOG_CAN_Teensy4.1
-Steering navagation controller files for Teensy based boards to use with AgOpenGPS 
+# AOG CAN Teensy 4.1 (AgOpenGPS Autosteer Controller)
 
-If your new to the teensy this is what ive had to do:
-1. You need to update the Arduino IDE
-2. Install the Teensy program
-3. The new updated Teensy program 1.55 now inclucdes the latest FlexCAN_T4 & Native Ethernet so you no longer have to update manually.
+Firmware and setup files for a Teensy 4.1 CAN-based steering controller used with AgOpenGPS.
 
-CaseIH Connections:  
-CAN1-H = Pin C Diagnostic connector right rear pillar  
-CAN1-L = Pin D Diagnostic connector right rear pillar  
-CAN3-H = Pin 3 Nav controller 40 pin connector X-716 or Pin H Diagnostic connector behind seat    
-CAN3-L = Pin 13 Nav controller 40 pin connector X-716 or Pin J Diagnostic connector behind seat  
+## Video
 
-[CaseIH_GPS.pdf](https://github.com/MechanicTony/AOG_CAN_Teensy4.1/files/10528432/CaseIH_GPS.pdf)
+- YouTube Shorts demo: https://youtube.com/shorts/DkzHTf-jfCc?is=lRpg4t4KHVOdaWYg
+
+## Getting Started (Teensy 4.1 + Arduino IDE)
+
+1. Update the Arduino IDE.
+2. Install Teensyduino.
+3. Teensyduino 1.55 includes newer FlexCAN_T4 and Native Ethernet support, so manual updates are usually not required.
+
+## Case IH CAN Connections
+
+- CAN1-H = Pin C, diagnostic connector (right rear pillar)
+- CAN1-L = Pin D, diagnostic connector (right rear pillar)
+- CAN3-H = Pin 3, nav controller 40-pin connector X-716, or Pin H diagnostic connector (behind seat)
+- CAN3-L = Pin 13, nav controller 40-pin connector X-716, or Pin J diagnostic connector (behind seat)
+
+## Reference
+
+- [CaseIH_GPS.pdf](https://github.com/MechanicTony/AOG_CAN_Teensy4.1/files/10528432/CaseIH_GPS.pdf)
