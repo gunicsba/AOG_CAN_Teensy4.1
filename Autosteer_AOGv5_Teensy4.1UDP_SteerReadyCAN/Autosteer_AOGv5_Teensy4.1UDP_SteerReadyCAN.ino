@@ -560,7 +560,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
           //read all the switches
 
           //CANBus     
-          if (steeringValveReady == 20 || steeringValveReady == 16) 
+          if (steeringValveReady == 20 || steeringValveReady == 16 || steeringValveReady == 0x50) 
           {
             digitalWrite(ledPin, HIGH);
           } 
@@ -621,7 +621,10 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
           previous = reading;
 
           //--------CAN CutOut--------------------------
-          if (steeringValveReady != 20 && steeringValveReady != 16)
+          // 0x50 = PVED reset requested — verified on MF 5S with external
+          // CAN sniffer that this is NOT a timeout or safety interlock,
+          // so we treat it as a valid state and keep steering.
+          if (steeringValveReady != 20 && steeringValveReady != 16 && steeringValveReady != 0x50)
           {
               steerSwitch = 1; // reset values like it turned off
               currentState = 1;

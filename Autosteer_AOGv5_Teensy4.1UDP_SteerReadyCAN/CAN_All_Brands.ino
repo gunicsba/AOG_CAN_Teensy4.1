@@ -30,6 +30,7 @@ if (Brand == 1){
   V_Bus.setFIFOFilter(2, 0x18EF1CFC, EXT);  //Mccormick Engage Message
   V_Bus.setFIFOFilter(3, 0x18EF1C00, EXT);  //MF Engage Message
   V_Bus.setFIFOFilter(4, 0x18FF8306, EXT);  //Mccormick Joystick
+  V_Bus.setFIFOFilter(5, 0x18EF1C13, EXT);  //MF 5S Engage Message
   CANBUS_ModuleID = 0x1C;
   }  
 if (Brand == 2){
@@ -181,13 +182,74 @@ else if (Brand == 1){
     VBusSendData.len = 8;
     VBusSendData.buf[0] = lowByte(setCurve);
     VBusSendData.buf[1] = highByte(setCurve);
-    if (intendToSteer == 1 || steeringValveReady == 0x40 || steeringValveReady == 0x10) VBusSendData.buf[2] = 253;
-    else VBusSendData.buf[2] = 252;
-    VBusSendData.buf[3] = 0;
-    VBusSendData.buf[4] = 0;
-    VBusSendData.buf[5] = 0;
-    VBusSendData.buf[6] = 0;
-    VBusSendData.buf[7] = 0;
+
+    // PVED GuidanceSystemCommand byte 2:
+    //   0xFD = intended for steering
+    //   0xFC = not intended for steering
+    // intendToSteer is the sole source of engage.
+    // PVED feedback must not auto-generate the steering request.
+    // PVED status (including 0x50 reset request) is logged.
+    // Per the official doc, a reset handshake IS performed (send 0xFC),
+    // but the CAN cutout does not disengage on 0x50, so steering
+    // resumes automatically once the reset clears.
+    constexpr uint8_t GUIDANCE_NOT_INTENDED = 0xFC;
+    constexpr uint8_t GUIDANCE_INTENDED     = 0xFD;
+
+    const uint8_t pvedStatus = steeringValveReady;
+    const bool resetRequested = (pvedStatus & 0xC0) == 0x40;
+    const bool machineCanExecute = (pvedStatus & 0x0C) == 0x04;
+
+    uint8_t cmd;
+    if (resetRequested) {
+        // PVED requires at least one not-intended command
+        // to complete the reset handshake.
+        cmd = GUIDANCE_NOT_INTENDED;
+    } else {
+        cmd = intendToSteer ? GUIDANCE_INTENDED : GUIDANCE_NOT_INTENDED;
+    }
+    VBusSendData.buf[2] = cmd;
+
+    // Debug: log whenever the transmitted intent changes
+    static uint8_t prevCmd = GUIDANCE_NOT_INTENDED;
+    if (cmd != prevCmd) {
+        Serial.print(millis());
+        Serial.print(" PVED cmd ");
+        Serial.print(prevCmd, HEX);
+        Serial.print("->");
+        Serial.print(cmd, HEX);
+        Serial.print(", intend=");
+        Serial.print(intendToSteer);
+        Serial.print(", status=0x");
+        Serial.print(pvedStatus, HEX);
+        Serial.print(", reset=");
+        Serial.print(resetRequested);
+        Serial.print(", canExec=");
+        Serial.println(machineCanExecute);
+        prevCmd = cmd;
+    }
+
+    // Debug: log whenever the PVED status byte changes
+    static uint8_t prevStatus = 0;
+    if (pvedStatus != prevStatus) {
+        Serial.print(millis());
+        Serial.print(" PVED status 0x");
+        Serial.print(prevStatus, HEX);
+        Serial.print("->0x");
+        Serial.print(pvedStatus, HEX);
+        Serial.print(", cmd=0x");
+        Serial.print(cmd, HEX);
+        Serial.print(", reset=");
+        Serial.print(resetRequested);
+        Serial.print(", canExec=");
+        Serial.println(machineCanExecute);
+        prevStatus = pvedStatus;
+    }
+
+    VBusSendData.buf[3] = 0xFF;
+    VBusSendData.buf[4] = 0xFF;
+    VBusSendData.buf[5] = 0xFF;
+    VBusSendData.buf[6] = 0xFF;
+    VBusSendData.buf[7] = 0xFF;
     V_Bus.write(VBusSendData);
 }
 else if (Brand == 2){
@@ -416,6 +478,16 @@ void VBus_Receive()
                 }
             } 
             else if (VBusReceiveData.id == 0x18EF1C00)//MF engage message
+            {
+                if ((VBusReceiveData.buf[0])== 15 && (VBusReceiveData.buf[1])== 96 && (VBusReceiveData.buf[2])== 1)
+                {   
+                    Time = millis();
+                    digitalWrite(engageLED,HIGH); 
+                    engageCAN = 1;
+                    relayTime = ((millis() + 1000));
+                }
+            } 
+            else if (VBusReceiveData.id == 0x18EF1C13)//MF 5S engage message
             {
                 if ((VBusReceiveData.buf[0])== 15 && (VBusReceiveData.buf[1])== 96 && (VBusReceiveData.buf[2])== 1)
                 {   
