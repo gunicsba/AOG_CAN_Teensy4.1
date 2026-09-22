@@ -8,6 +8,7 @@
 //  5 = FendtOne - Same as Fendt but 500kbs K-Bus.
 //  6 = Lindner (F0/240 Navagation Controller, 13/19 Steering Controller)
 //  7 = AgOpenGPS - Remote CAN/PWM module (1C/28 Navagation Controller, 13/19 Steering Controller)
+//  10 = Claas Xerion (1C Navigation Controller taken over by us, D2 Steering Controller) - See Downloads/XERION_AUTOSTEER_SPEC.md
 
 //---Start Teensy CANBus Ports and Claim Addresses - If needed 
 
@@ -69,8 +70,17 @@ if (Brand == 9) {
     V_Bus.setFIFOFilter(0, 0x0CEFFF76, EXT);  //Cat MTxxx Curve data, valve state and engage messages
     CANBUS_ModuleID = 0x2C;
 }
-  
-// Claim V_Bus Address 
+if (Brand == 10){
+  V_Bus.setFIFOFilter(0, 0x0CFFA25A, EXT);  //Xerion true curvature / yaw rate / heading (0x5A, 20 Hz) - use as estCurve
+  V_Bus.setFIFOFilter(1, 0x0CAC1CD2, EXT);  //Xerion Guidance Machine Status (0xD2->0x1C, 1 Hz)
+  V_Bus.setFIFOFilter(2, 0x18EF1CD2, EXT);  //Xerion fast engaged bit (0xD2->0x1C, 10 Hz)
+  V_Bus.setFIFOFilter(3, 0x18FFE1D2, EXT);  //Xerion steering controller state (0xD2, 20 Hz)
+  V_Bus.setFIFOFilter(4, 0x0CFE48D2, EXT);  //Xerion wheel speed & direction (0xD2, 10 Hz)
+  V_Bus.setFIFOFilter(5, 0x0CADD21C, EXT);  //Watch for a foreign nav controller still commanding the D2
+  CANBUS_ModuleID = 0x1C;                   //We take over the factory nav controller's address
+  }
+
+// Claim V_Bus Address
 if (Brand >= 0 && Brand <= 9){
   CAN_message_t msgV;
   if (Brand == 0) msgV.id = 0x18EEFF1E;       //Claas
@@ -95,6 +105,27 @@ if (Brand >= 0 && Brand <= 9){
   msgV.buf[7] = 0x20;
   V_Bus.write(msgV);
 }
+#if XERION_SEND_ADDRESS_CLAIM
+if (Brand == 10){
+  //No claim traffic (PGN 0xEE00) was seen from the factory 0x1C in any capture, but that
+  //controller never had to contend for the address either. We physically remove it and
+  //become the sole node at 0x1C, so we claim it properly. Set XERION_SEND_ADDRESS_CLAIM to
+  //0 only if field testing shows the D2 steering controller dislikes the claim frame.
+  CAN_message_t msgVXerion;
+  msgVXerion.id = 0x18EEFF1C;
+  msgVXerion.flags.extended = true;
+  msgVXerion.len = 8;
+  msgVXerion.buf[0] = 0x00;
+  msgVXerion.buf[1] = 0x00;
+  msgVXerion.buf[2] = 0xC0;
+  msgVXerion.buf[3] = 0x0C;
+  msgVXerion.buf[4] = 0x00;
+  msgVXerion.buf[5] = 0x17;
+  msgVXerion.buf[6] = 0x02;
+  msgVXerion.buf[7] = 0x20;
+  V_Bus.write(msgVXerion);
+}
+#endif
 delay(500);
 
 //ISO_Bus is CAN-2 
@@ -150,12 +181,59 @@ if (Brand == 5){
 if (Brand == 2){
   K_Bus.setFIFOFilter(0, 0x14FF7706, EXT);  //CaseIH Engage Message
   K_Bus.setFIFOFilter(1, 0x18FE4523, EXT);  //CaseIH Rear Hitch Infomation
-  } 
-  
-  delay (300); 
+  }
+if (Brand == 10){
+  K_Bus.setFIFOFilter(0, 0x10613173, EXT);  //Xerion K-Bus (cab) engage/disengage button, SA 0x73
+  }
+
+  delay (300);
 
 } //End CAN SETUP
 
+
+//---Xerion (Brand 10) readiness + safety interlocks--------------------------------
+// Recomputed every call, never latched. See Downloads/XERION_AUTOSTEER_SPEC.md 5.4/5.6.
+void xerionUpdateReadiness()
+{
+    uint32_t nowMs = millis();
+
+    bool statusFresh   = (xerionLastStatusMs != 0) && (nowMs - xerionLastStatusMs < 2500);
+    bool curveFresh    = (xerionLastCurveMs  != 0) && (nowMs - xerionLastCurveMs  < 250);
+    bool readyBit      = statusFresh && ((xerionStatus & 0x04) != 0);
+    bool atStandstill  = (xerionDirBits == 3);
+
+    //Fast (10 Hz) operator-override detector: we were steering and the EF engaged bit dropped.
+    //This is intentionally ahead of the slow 1 Hz AC status confirmation (spec 3.2/3.4).
+    bool overrideDetected = xerionWasSteering && !xerionEngagedFast;
+    xerionWasSteering = (intendToSteer == 1) && xerionEngagedFast;
+
+    if (readyBit && curveFresh && !atStandstill && !overrideDetected)
+    {
+        steeringValveReady = 16; //ready to engage - the "0x10 ready" value other brands also use
+    }
+    else
+    {
+        //Not ready. The generic CAN CutOut block (main .ino) will force steerSwitch off,
+        //which requires a fresh AOG/K-Bus engage request before intent can be re-asserted.
+        steeringValveReady = 0;
+    }
+
+    //Latched "not ready" alarm - status 0x70 held for more than 3 s while running.
+    if (xerionStatus == 0x70)
+    {
+        if (xerionNotReadySinceMs == 0) xerionNotReadySinceMs = nowMs;
+        else if (!xerionNotReadyReported && (nowMs - xerionNotReadySinceMs > 3000))
+        {
+            Serial.println("Xerion steering not ready - may need key cycle");
+            xerionNotReadyReported = true;
+        }
+    }
+    else
+    {
+        xerionNotReadySinceMs = 0;
+        xerionNotReadyReported = false;
+    }
+}
 
 //---Send V_Bus message
 
@@ -384,6 +462,62 @@ else if (Brand == 7){
         VBusSendData.buf[6] = 255;
         VBusSendData.buf[7] = 255;
         V_Bus.write(VBusSendData);
+    }
+    else if (Brand == 10)
+    {
+        xerionUpdateReadiness();
+
+        uint32_t nowMs = millis();
+        bool foreignNavPresent = (xerionForeignNavMs != 0) && (nowMs - xerionForeignNavMs < 1000);
+
+        if (foreignNavPresent)
+        {
+            //Interlock 1: the factory nav controller is still transmitting 0x0CADD21C - never transmit.
+            static uint32_t lastWarnMs = 0;
+            if (nowMs - lastWarnMs > 2000)
+            {
+                Serial.println("Xerion: factory nav controller still on 0x1C - refusing to transmit");
+                lastWarnMs = nowMs;
+            }
+            return;
+        }
+
+        //Clamp to the observed factory range (measured curvature hit +-804 counts at full lock).
+        int32_t clamped = (int32_t)setCurve;
+        if (clamped > 32128 + 800) clamped = 32128 + 800;
+        if (clamped < 32128 - 800) clamped = 32128 - 800;
+        setCurve = (uint16_t)clamped;
+
+        VBusSendData.id = 0x0CADD21C;
+        VBusSendData.flags.extended = true;
+        VBusSendData.len = 8;
+        VBusSendData.buf[0] = lowByte(setCurve);
+        VBusSendData.buf[1] = highByte(setCurve);
+        VBusSendData.buf[2] = intendToSteer ? 0x01 : 0x00; //copy the factory bytes exactly - not the 0xFD/0xFC used elsewhere
+        VBusSendData.buf[3] = 0;
+        VBusSendData.buf[4] = 0;
+        VBusSendData.buf[5] = 0;
+        VBusSendData.buf[6] = 0;
+        VBusSendData.buf[7] = 0;
+        V_Bus.write(VBusSendData);
+
+        if (ShowCANData == 1)
+        {
+            static uint32_t lastDebugMs = 0;
+            if (nowMs - lastDebugMs > 200) //5 Hz debug summary (spec 7.4)
+            {
+                lastDebugMs = nowMs;
+                Serial.print("Xerion status=0x"); Serial.print(xerionStatus, HEX);
+                Serial.print(" E1=0x"); Serial.print(xerionStateCode, HEX);
+                Serial.print(" EFengaged="); Serial.print(xerionEngagedFast);
+                Serial.print(" estCurve="); Serial.print(estCurve);
+                Serial.print(" setCurve="); Serial.print(setCurve);
+                Serial.print(" intent="); Serial.print(intendToSteer);
+                Serial.print(" dirBits="); Serial.print(xerionDirBits);
+                Serial.print(" speed="); Serial.print(xerionWheelSpeed_mps);
+                Serial.print(" foreignNav="); Serial.println(foreignNavPresent);
+            }
+        }
     }
 }
 
@@ -703,6 +837,57 @@ void VBus_Receive()
 
         }//End Brand == 9
 
+        else if (Brand == 10)
+        {
+            uint32_t nowMs = millis();
+
+            //**0x0CFFA25A (20 Hz) - true path curvature, yaw rate, heading - all BIG-endian**
+            if (VBusReceiveData.id == 0x0CFFA25A)
+            {
+                estCurve = ((uint16_t)VBusReceiveData.buf[0] << 8) | VBusReceiveData.buf[1];
+                xerionYawRaw = (int16_t)((((uint16_t)VBusReceiveData.buf[2] << 8) | VBusReceiveData.buf[3]) - 32768);
+                xerionHeadingDeg = (((uint16_t)VBusReceiveData.buf[4] << 8) | VBusReceiveData.buf[5]) * 360.0f / 65536.0f;
+                xerionLastCurveMs = nowMs;
+            }
+
+            //**0x0CAC1CD2 (1 Hz) - Guidance Machine Status: status byte + front-axle curvature, LITTLE-endian**
+            else if (VBusReceiveData.id == 0x0CAC1CD2)
+            {
+                xerionAcCurve = VBusReceiveData.buf[0] | ((uint16_t)VBusReceiveData.buf[1] << 8);
+                xerionStatus = VBusReceiveData.buf[2];
+                xerionLastStatusMs = nowMs;
+            }
+
+            //**0x18EF1CD2 (10 Hz) - fast engaged bit**
+            else if (VBusReceiveData.id == 0x18EF1CD2)
+            {
+                xerionEngagedFast = bitRead(VBusReceiveData.buf[0], 2) != 0;
+                xerionLastEngageMs = nowMs;
+            }
+
+            //**0x18FFE1D2 (20 Hz) - steering controller state code**
+            else if (VBusReceiveData.id == 0x18FFE1D2)
+            {
+                xerionStateCode = VBusReceiveData.buf[0];
+                xerionLastStateMs = nowMs;
+            }
+
+            //**0x0CFE48D2 (10 Hz) - wheel-based speed and direction**
+            else if (VBusReceiveData.id == 0x0CFE48D2)
+            {
+                xerionWheelSpeed_mps = (VBusReceiveData.buf[0] | ((uint16_t)VBusReceiveData.buf[1] << 8)) * 0.001f;
+                xerionDirBits = VBusReceiveData.buf[7] & 0x03;
+                xerionLastSpeedMs = nowMs;
+            }
+
+            //**0x0CADD21C - is a foreign 0x1C still commanding the D2?**
+            else if (VBusReceiveData.id == 0x0CADD21C)
+            {
+                xerionForeignNavMs = nowMs;
+            }
+
+        }//End Brand == 10
+
         if (ShowCANData == 1)
         {
             Serial.print(Time);
@@ -880,8 +1065,30 @@ void K_Receive()
           {
             KBUSRearHitch = (KBusReceiveData.buf[0]); 
             pressureReading = KBUSRearHitch;
-            if (steerConfig.PressureSensor == 1 && KBUSRearHitch < steerConfig.PulseCountMax) workCAN = 1; 
-            else workCAN = 0; 
+            if (steerConfig.PressureSensor == 1 && KBUSRearHitch < steerConfig.PulseCountMax) workCAN = 1;
+            else workCAN = 0;
+          }
+      }
+
+      if (Brand == 10)
+      {
+          if (KBusReceiveData.id == 0x10613173)   //**Xerion K-Bus (cab) engage/disengage button, SA 0x73**
+          {
+              uint8_t val = KBusReceiveData.buf[0];
+              uint32_t nowMs = millis();
+              //Edge-triggered with ~200 ms debounce (semantics still need confirming, spec 3.9/9)
+              if (val != xerionKbusLast && (nowMs - xerionKbusChangeMs) > 200)
+              {
+                  xerionKbusChangeMs = nowMs;
+                  xerionKbusLast = val;
+                  if (val == 0x01)   //owner's note: 0x01 = steering on
+                  {
+                      Time = millis();
+                      digitalWrite(engageLED, HIGH);
+                      engageCAN = 1;
+                      relayTime = ((millis() + 1000));
+                  }
+              }
           }
       }
 

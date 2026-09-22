@@ -58,7 +58,15 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
    *   3921hz = 2
    */
   #define PWM_Frequency 0
-  
+
+  //Claas Xerion (Brand 10) options - see Downloads/XERION_AUTOSTEER_SPEC.md
+  //The captured logs show the factory nav controller at 0x1C never sends an
+  //address claim, but that's because it never has to contend with anything
+  //else for 0x1C. We physically remove the factory controller and become
+  //the only node at 0x1C, so we claim the address properly on power-up.
+  //Set to 0 only if field testing shows the D2 steering controller dislikes it.
+  #define XERION_SEND_ADDRESS_CLAIM 1
+
   /////////////////////////////////////////////
 
   // if not in eeprom, overwrite 
@@ -185,6 +193,34 @@ float outputWASFendt[] =    { -60.00, -54.0, -48.0, -42.3, -36.1, -30.1, -23.4, 
 boolean sendCAN = 0;              //Send CAN message every 2nd cycle (If needed ?)
 uint8_t steeringValveReady = 0;   //Variable for Steering Valve State from CAN
 boolean intendToSteer = 0;        //Do We Intend to Steer?
+
+//----Claas Xerion (Brand 10) state - see Downloads/XERION_AUTOSTEER_SPEC.md-----
+uint8_t  xerionStatus          = 0;      //0x0CAC1CD2 b2, 1 Hz guidance machine status bitfield
+uint16_t xerionAcCurve         = 32128;  //0x0CAC1CD2 b0-1 LE, front-axle-based curvature (kept for Phase 2 crab calc)
+uint32_t xerionLastStatusMs    = 0;
+
+int16_t  xerionYawRaw          = 0;      //0x0CFFA25A b2-3 BE, optional
+float    xerionHeadingDeg      = 0;      //0x0CFFA25A b4-5 BE, optional
+uint32_t xerionLastCurveMs     = 0;      //freshness for 0x0CFFA25A, 20 Hz
+
+bool     xerionEngagedFast     = false;  //0x18EF1CD2 b0 bit2, 10 Hz - fast override detector
+uint32_t xerionLastEngageMs    = 0;
+
+uint8_t  xerionStateCode       = 0;      //0x18FFE1D2 b0, 20 Hz
+uint32_t xerionLastStateMs     = 0;
+
+float    xerionWheelSpeed_mps  = 0;      //0x0CFE48D2 b0-1 LE, 10 Hz
+uint8_t  xerionDirBits         = 3;      //0x0CFE48D2 b7 bits0-1, 3 = n/a
+uint32_t xerionLastSpeedMs     = 0;
+
+uint32_t xerionForeignNavMs    = 0;      //last time 0x0CADD21C was seen from a node that isn't us
+
+bool     xerionWasSteering     = false;  //for the fast operator-override edge detector
+uint32_t xerionNotReadySinceMs = 0;      //status 0x70 latch timer, 0 = not currently latched
+bool     xerionNotReadyReported = false;
+
+uint8_t  xerionKbusLast        = 0xFF;   //0x10613173 b0 last value seen, 0xFF = unseen
+uint32_t xerionKbusChangeMs    = 0;      //debounce timer for the K-Bus engage button
 
 //----Teensy 4.1 CANBus--End-----------------------
     
@@ -508,6 +544,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       else if (Brand == 7) Serial.println("Brand = AgOpenGPS (Set Via Service Tool)");
       else if (Brand == 8) Serial.println("Brand = Cat MT Late (Set Via Service Tool)");
       else if (Brand == 9) Serial.println("Brand = Cat MT Early (Set Via Service Tool)");
+      else if (Brand == 10) Serial.println("Brand = Claas Xerion (Set Via Service Tool)");
       else Serial.println("No Tractor Brand Set, Set Via Service Tool");
 
       Serial.println("\r\nGPS Mode:");
@@ -1132,6 +1169,7 @@ void udpSteerRecv(int sizeToRead)
        else if (Brand == 6) Serial.println("Brand = Lindner (Set Via Service Tool)");
        else if (Brand == 7) Serial.println("Brand = AgOpenGPS (Set Via Service Tool)");
        else if (Brand == 8) Serial.println("Brand = Cat MT (Set Via Service Tool)");
+       else if (Brand == 10) Serial.println("Brand = Claas Xerion (Set Via Service Tool)");
        else Serial.println("No Tractor Brand Set, Set Via Service Tool");
 
        Serial.println("\r\nGPS Mode:");

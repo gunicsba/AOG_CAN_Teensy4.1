@@ -17,3 +17,6 @@ CAN3-L = Pin 13 Nav controller 40 pin connector X-716 or Pin J Diagnostic connec
 Deutz Warrior
 CAN1 = Pin CD Diagnostic connector
 CAN3 = Pin EF Diagnostic connector
+
+Claas Xerion (Brand 10, untested — reverse-engineered from CAN logs, looking
+for owners to test): see [XERION_NOTES.md](Autosteer_AOGv5_Teensy4.1UDP_SteerReadyCAN/XERION_NOTES.md)
