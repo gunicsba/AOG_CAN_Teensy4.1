@@ -67,6 +67,15 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
   //Set to 0 only if field testing shows the D2 steering controller dislikes it.
   #define XERION_SEND_ADDRESS_CLAIM 1
 
+  //Community tip: look and sound like the factory nav controller on the bus -
+  //send every 0x1C frame it sends, at the same rate it sends them, not just
+  //the curvature command. Content for 0x1CFFCE1C is only partially confirmed
+  //(spec §3.7) - flip its flag to 0 individually if it causes trouble.
+  #define XERION_EMULATE_1CEF5A1C 1   //10 Hz constant keep-alive
+  #define XERION_EMULATE_1CFFCE1C 1   //10 Hz, b0 confirmed, rest best-effort
+  #define XERION_EMULATE_1CFFCC1C 1   //1 Hz keep-alive
+  #define XERION_EMULATE_1CFFCD1C 1   //1 Hz constant keep-alive
+
   /////////////////////////////////////////////
 
   // if not in eeprom, overwrite 
@@ -221,6 +230,13 @@ bool     xerionNotReadyReported = false;
 
 uint8_t  xerionKbusLast        = 0xFF;   //0x10613173 b0 last value seen, 0xFF = unseen
 uint32_t xerionKbusChangeMs    = 0;      //debounce timer for the K-Bus engage button
+
+//TX pacing - match the factory nav controller's own rates, not the main loop rate
+uint32_t xerionLastTxCurveMs   = 0;      //0x0CADD21C, 10 Hz
+uint32_t xerionLastTxEf5aMs    = 0;      //0x1CEF5A1C, 10 Hz keep-alive
+uint32_t xerionLastTxCe1cMs    = 0;      //0x1CFFCE1C, 10 Hz keep-alive
+uint32_t xerionLastTxCc1cMs    = 0;      //0x1CFFCC1C, 1 Hz keep-alive
+uint32_t xerionLastTxCd1cMs    = 0;      //0x1CFFCD1C, 1 Hz keep-alive
 
 //----Teensy 4.1 CANBus--End-----------------------
     

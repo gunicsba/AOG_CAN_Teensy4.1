@@ -30,7 +30,16 @@ the factory controller wired in.
   10 Hz).
 - Transmits `0x0CADD21C` (curvature command) with the factory's exact byte
   layout (`0x01`/`0x00` intent byte, zero padding — not the `0xFD`/`0xFC`
-  scheme the other brands use), clamped to `32128 ± 800` counts.
+  scheme the other brands use), clamped to `32128 ± 800` counts, at a fixed
+  10 Hz — matching the factory nav controller's own rate rather than piggy-
+  backing on the main loop's 25 Hz.
+- Community tip: also replay the factory controller's other `0x1C` broadcast
+  frames (§3.7) at their own observed rates, not just the curvature command —
+  `0x1CEF5A1C` (10 Hz, constant), `0x1CFFCE1C` (10 Hz, only `b0` confirmed —
+  the rest is a best-effort placeholder), `0x1CFFCC1C` and `0x1CFFCD1C`
+  (1 Hz each). Each one is behind its own compile flag in the main `.ino`
+  (`XERION_EMULATE_...`, on by default) in case a specific frame turns out to
+  upset something on a real machine.
 - Sends a proper address claim for `0x1C` on power-up (`XERION_SEND_ADDRESS_CLAIM`
   in the main `.ino`, on by default — flip to `0` if a real Xerion turns out to
   dislike it; the captures never showed one being sent, but they also never
@@ -61,10 +70,6 @@ the factory controller wired in.
   it to AgOpenGPS so the machine draws and steers correctly while crabbing —
   needs a new AOG-facing CAN PGN and a matching AgOpenGPS (C#) patch. Both are
   out of scope for this firmware-only pass; see spec §6–§7.
-- **Keep-alive emulation** for the other `0x1C → *` frames (§3.7) — only
-  wire these up if removing the factory controller turns out to make the
-  Xerion drop `0x0CFFA25A`, stop reaching AC status `0x74`, or ignore intent.
-  Each one should go behind its own compile flag if needed.
 
 ## Biggest open questions (need a real machine)
 
@@ -82,8 +87,11 @@ specifically during testing:
    enough that it might be momentary press/release rather than a latched
    state. If it's momentary, our edge-trigger-on-`0x01` handling is right;
    if it's latched and toggles for other reasons, it could misfire.
-4. **Keep-alives** — does the D2/5A stack need any of the other `0x1C`
-   broadcast frames once the factory controller is gone?
+4. **Keep-alive content.** We now replay `0x1CEF5A1C`/`0x1CFFCE1C`/`0x1CFFCC1C`/
+   `0x1CFFCD1C` at the factory's rates (per a community tip), but `0x1CFFCE1C`'s
+   payload beyond `b0` is a guess — the logs show it varying and possibly
+   carrying cross-track data. If a real Xerion reacts badly to any one of
+   these, flip its `XERION_EMULATE_...` flag off individually and report which.
 5. **`0x70` latch** — what actually triggers the "needs restart" state, and
    does our interlock logic avoid causing it?
 

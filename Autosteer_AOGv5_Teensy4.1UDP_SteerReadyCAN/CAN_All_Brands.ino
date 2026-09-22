@@ -488,18 +488,81 @@ else if (Brand == 7){
         if (clamped < 32128 - 800) clamped = 32128 - 800;
         setCurve = (uint16_t)clamped;
 
-        VBusSendData.id = 0x0CADD21C;
-        VBusSendData.flags.extended = true;
-        VBusSendData.len = 8;
-        VBusSendData.buf[0] = lowByte(setCurve);
-        VBusSendData.buf[1] = highByte(setCurve);
-        VBusSendData.buf[2] = intendToSteer ? 0x01 : 0x00; //copy the factory bytes exactly - not the 0xFD/0xFC used elsewhere
-        VBusSendData.buf[3] = 0;
-        VBusSendData.buf[4] = 0;
-        VBusSendData.buf[5] = 0;
-        VBusSendData.buf[6] = 0;
-        VBusSendData.buf[7] = 0;
-        V_Bus.write(VBusSendData);
+        //0x0CADD21C - Guidance System Command, 10 Hz (100 ms), matching the factory
+        //controller's own rate exactly rather than the main loop's 25 Hz - don't burst.
+        if (nowMs - xerionLastTxCurveMs >= 100)
+        {
+            xerionLastTxCurveMs = nowMs;
+            VBusSendData.id = 0x0CADD21C;
+            VBusSendData.flags.extended = true;
+            VBusSendData.len = 8;
+            VBusSendData.buf[0] = lowByte(setCurve);
+            VBusSendData.buf[1] = highByte(setCurve);
+            VBusSendData.buf[2] = intendToSteer ? 0x01 : 0x00; //copy the factory bytes exactly - not the 0xFD/0xFC used elsewhere
+            VBusSendData.buf[3] = 0;
+            VBusSendData.buf[4] = 0;
+            VBusSendData.buf[5] = 0;
+            VBusSendData.buf[6] = 0;
+            VBusSendData.buf[7] = 0;
+            V_Bus.write(VBusSendData);
+        }
+
+        //Community tip: look like the factory nav controller on the bus - replay its other
+        //0x1C keep-alive frames at their own observed rates too, not just the curvature
+        //command (spec §3.7/§5.7). Each one is behind its own flag - see the top of the
+        //main .ino - in case a specific frame turns out to upset something on a real Xerion.
+#if XERION_EMULATE_1CEF5A1C
+        if (nowMs - xerionLastTxEf5aMs >= 100)   //10 Hz, constant payload in every capture
+        {
+            xerionLastTxEf5aMs = nowMs;
+            CAN_message_t msgEf5a;
+            msgEf5a.id = 0x1CEF5A1C;
+            msgEf5a.flags.extended = true;
+            msgEf5a.len = 8;
+            msgEf5a.buf[0] = 0x04; msgEf5a.buf[1] = 0xBF; msgEf5a.buf[2] = 0xB7; msgEf5a.buf[3] = 0x1B;
+            msgEf5a.buf[4] = 0xD1; msgEf5a.buf[5] = 0x5F; msgEf5a.buf[6] = 0x9A; msgEf5a.buf[7] = 0x0A;
+            V_Bus.write(msgEf5a);
+        }
+#endif
+#if XERION_EMULATE_1CFFCE1C
+        if (nowMs - xerionLastTxCe1cMs >= 100)   //10 Hz - only b0 is confirmed, rest is best-effort
+        {
+            xerionLastTxCe1cMs = nowMs;
+            CAN_message_t msgCe1c;
+            msgCe1c.id = 0x1CFFCE1C;
+            msgCe1c.flags.extended = true;
+            msgCe1c.len = 8;
+            msgCe1c.buf[0] = 0x31; msgCe1c.buf[1] = 0x00; msgCe1c.buf[2] = 0x00; msgCe1c.buf[3] = 0x00;
+            msgCe1c.buf[4] = 0x00; msgCe1c.buf[5] = 0x00; msgCe1c.buf[6] = 0x00; msgCe1c.buf[7] = 0x00;
+            V_Bus.write(msgCe1c);
+        }
+#endif
+#if XERION_EMULATE_1CFFCC1C
+        if (nowMs - xerionLastTxCc1cMs >= 1000)  //1 Hz
+        {
+            xerionLastTxCc1cMs = nowMs;
+            CAN_message_t msgCc1c;
+            msgCc1c.id = 0x1CFFCC1C;
+            msgCc1c.flags.extended = true;
+            msgCc1c.len = 8;
+            msgCc1c.buf[0] = 0x00; msgCc1c.buf[1] = 0x00; msgCc1c.buf[2] = 0x80; msgCc1c.buf[3] = 0x00;
+            msgCc1c.buf[4] = 0x80; msgCc1c.buf[5] = 0x00; msgCc1c.buf[6] = 0x01; msgCc1c.buf[7] = 0x00; //b7 varies in the logs, unconfirmed
+            V_Bus.write(msgCc1c);
+        }
+#endif
+#if XERION_EMULATE_1CFFCD1C
+        if (nowMs - xerionLastTxCd1cMs >= 1000)  //1 Hz, constant payload in every capture
+        {
+            xerionLastTxCd1cMs = nowMs;
+            CAN_message_t msgCd1c;
+            msgCd1c.id = 0x1CFFCD1C;
+            msgCd1c.flags.extended = true;
+            msgCd1c.len = 8;
+            msgCd1c.buf[0] = 0x0D; msgCd1c.buf[1] = 0x98; msgCd1c.buf[2] = 0x7E; msgCd1c.buf[3] = 0xA2;
+            msgCd1c.buf[4] = 0x80; msgCd1c.buf[5] = 0x00; msgCd1c.buf[6] = 0x0C; msgCd1c.buf[7] = 0xE4;
+            V_Bus.write(msgCd1c);
+        }
+#endif
 
         if (ShowCANData == 1)
         {
