@@ -30,16 +30,18 @@ the factory controller wired in.
   10 Hz).
 - Transmits `0x0CADD21C` (curvature command) with the factory's exact byte
   layout (`0x01`/`0x00` intent byte, zero padding — not the `0xFD`/`0xFC`
-  scheme the other brands use), clamped to `32128 ± 800` counts, at a fixed
-  10 Hz — matching the factory nav controller's own rate rather than piggy-
-  backing on the main loop's 25 Hz.
+  scheme the other brands use) at a fixed 10 Hz, matching the factory nav
+  controller's own rate rather than piggybacking on the main loop's 25 Hz.
+  Curvature is pinned at `32128` (straight) whenever intent is 0, matching
+  every idle frame in the captures byte-for-byte; while actively steering
+  it's clamped to `32128 ± 800` counts.
 - Community tip: also replay the factory controller's other `0x1C` broadcast
   frames (§3.7) at their own observed rates, not just the curvature command —
-  `0x1CEF5A1C` (10 Hz, constant), `0x1CFFCE1C` (10 Hz, only `b0` confirmed —
-  the rest is a best-effort placeholder), `0x1CFFCC1C` and `0x1CFFCD1C`
-  (1 Hz each). Each one is behind its own compile flag in the main `.ino`
-  (`XERION_EMULATE_...`, on by default) in case a specific frame turns out to
-  upset something on a real machine.
+  `0x1CEF5A1C` and `0x1CFFCC1C`/`0x1CFFCD1C` at the confirmed rates (10 Hz,
+  1 Hz, 1 Hz). `0x1CFFCE1C` is implemented but **off by default** — see
+  "Verified against the raw captures" below for why. Each is behind its own
+  compile flag in the main `.ino` (`XERION_EMULATE_...`) in case a specific
+  frame turns out to upset something on a real machine.
 - Sends a proper address claim for `0x1C` on power-up (`XERION_SEND_ADDRESS_CLAIM`
   in the main `.ino`, on by default — flip to `0` if a real Xerion turns out to
   dislike it; the captures never showed one being sent, but they also never
@@ -63,6 +65,64 @@ the factory controller wired in.
   limiting reuse the existing generic code paths (same as Claas/Valtra),
   no Xerion-specific changes were needed there.
 
+## Verified against the raw captures
+
+The spec above was already built from these captures, but the firmware was
+written against the spec's *summary*, not the raw CAN logs. We went back and
+checked the implementation against the four capture CSVs directly (`CAN3_XERION.csv`,
+`xerion disengage turn right then engage.csv`, `xerioncan3.csv`, `joystick can.csv`
+— all from `xerion.zip`; we don't have `starting_up_the_tractor.csv`). Findings:
+
+- **Rates all check out exactly.** Using the spec's own GNSS-seconds recovery
+  method (§9 appendix — the `Time Stamp` column is unusable, confirmed: it
+  repeats the same value across tens of thousands of unrelated rows, it's not
+  just wrapping), every rate we assumed matches: `0x0CAC1CD2` ~1.0 Hz,
+  `0x18EF1CD2`/`0x0CFE48D2`/`0x0CADD21C`/`0x1CEF5A1C`/`0x1CFFCE1C` ~10 Hz,
+  `0x18FFE1D2`/`0x0CFFA25A` ~20 Hz, `0x1CFFCC1C`/`0x1CFFCD1C` ~1 Hz, across
+  all three V-Bus files.
+- **Found and fixed: idle-frame curvature.** Every single `0x0CADD21C` frame
+  with intent byte `0` (707 of them, across all three files) is byte-for-byte
+  `80 7D 00 00 00 00 00 00` — the factory always pins curvature at `32128`
+  when not steering, regardless of the vehicle's actual curvature. Our
+  firmware previously sent whatever `setCurve` happened to hold (which tracks
+  the actual curvature when idle, for AOG's angle display) — now fixed to
+  send the fixed idle pattern on the wire while leaving the AOG-facing
+  `setCurve`/angle-display value untouched.
+- **Clamp range vs. what was actually observed.** Commanded curvature
+  (`0x0CADD21C`) from the factory stayed within exactly `32128 ± 600` in every
+  file — but *actual* curvature (`0x0CFFA25A`) hit as far as `32128 - 917` in
+  one file and `32128 + 834` in another, i.e. slightly past our current
+  `± 800` TX clamp on one side. We left the clamp at `± 800` (it's a safety
+  margin on what we command, not a target to hit) rather than change a
+  safety-relevant number without a real machine to check against — worth
+  revisiting once someone can confirm true full-lock values on their tractor.
+- **K-Bus button (`0x10613173`) semantics — resolved, mostly.** The frame is
+  1 byte long (`LEN=1`), and across the whole `joystick can.csv` capture it
+  transitions `0x01`/`0x03` **47 times, perfectly alternating, with zero
+  chatter or repeats**, and is only ever sent when the value changes (89
+  total frames across a 415k-row file — not periodic). That's a clean
+  send-on-change state report, not bounce, which supports the owner's
+  `0x01`=on/`0x03`=off reading and means our edge-trigger approach is on
+  solid ground. What's still unconfirmed is whether `0x01` really means
+  "engage" in the AOG sense (vs. some other cab state) — we don't have a
+  press log correlated with what the operator was actually doing.
+- **Found: `0x1CFFCE1C` payload is not a heartbeat.** Only byte 0 (`0x31`) is
+  constant. The other 7 bytes are essentially unique on nearly every frame in
+  all three V-Bus files (4796/5825, 781/783, and 493/493 distinct payloads
+  respectively) and don't even share the same "typical" values between
+  capture sessions. This is live data, not a fixed protocol constant, so a
+  canned replay would be fabricated content rather than a best-effort guess —
+  disabled by default (see above).
+- **Everything else matches:** `0x0CAC1CD2` status byte only ever takes the
+  four documented values (`0x34`/`0x74`/`0x70`/`0x30` — and `0x30` never
+  actually appears in any of the four files); `0x18EF1CD2` bytes 1-2 are
+  `CF 7B` in 100% of frames; `0x18FFE1D2` state codes never exceed the
+  documented set; `0x0CADD21C` bytes 3-7 are always zero; `0x1CEF5A1C` and
+  `0x1CFFCD1C` are byte-for-byte constant in all three files, matching the
+  values already coded; `0x1CFFCC1C` is constant except its last byte (which
+  the code already flagged as unconfirmed); no address-claim traffic
+  (`PF=0xEE`) appears anywhere.
+
 ## What's deliberately not done yet
 
 - **Crab/rear-axle angle (β) and the AgOpenGPS side of things.** The spec's
@@ -82,18 +142,19 @@ specifically during testing:
    the actual ISO 11783-7 byte-3 layout.
 2. **Address claim.** Now sent by default (see above) — watch for the D2
    rejecting it or faulting.
-3. **K-Bus button semantics** (`0x10613173` b0, `0x01`/`0x03`). Owner's note
-   says `0x01` = on, `0x03` = off, but the capture shows it toggling quickly
-   enough that it might be momentary press/release rather than a latched
-   state. If it's momentary, our edge-trigger-on-`0x01` handling is right;
-   if it's latched and toggles for other reasons, it could misfire.
-4. **Keep-alive content.** We now replay `0x1CEF5A1C`/`0x1CFFCE1C`/`0x1CFFCC1C`/
-   `0x1CFFCD1C` at the factory's rates (per a community tip), but `0x1CFFCE1C`'s
-   payload beyond `b0` is a guess — the logs show it varying and possibly
-   carrying cross-track data. If a real Xerion reacts badly to any one of
-   these, flip its `XERION_EMULATE_...` flag off individually and report which.
+3. **K-Bus button meaning** (`0x10613173` b0, `0x01`/`0x03`). The *pattern*
+   is now confirmed clean (see above — a perfectly alternating send-on-change
+   report, not bounce), so our edge-trigger handling is on solid ground
+   mechanically. What's still unconfirmed is whether `0x01` really correlates
+   with the operator asking for autosteer, specifically — needs a press log.
+4. **`0x1CFFCE1C`.** Left disabled (see above) — if you want to help pin down
+   what it actually carries, a capture with driving notes (speed, turning,
+   cross-track) alongside it would help decode the varying bytes.
 5. **`0x70` latch** — what actually triggers the "needs restart" state, and
    does our interlock logic avoid causing it?
+6. **Clamp range.** Our `± 800` TX clamp is slightly inside the actual
+   observed curvature extremes (`-917`/`+834`) — confirm real full-lock
+   values and whether `± 800` is unnecessarily conservative.
 
 ## Test procedure
 

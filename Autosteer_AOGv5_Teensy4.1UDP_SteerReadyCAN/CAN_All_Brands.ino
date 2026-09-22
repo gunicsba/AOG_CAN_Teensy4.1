@@ -482,11 +482,21 @@ else if (Brand == 7){
             return;
         }
 
-        //Clamp to the observed factory range (measured curvature hit +-804 counts at full lock).
-        int32_t clamped = (int32_t)setCurve;
-        if (clamped > 32128 + 800) clamped = 32128 + 800;
-        if (clamped < 32128 - 800) clamped = 32128 - 800;
-        setCurve = (uint16_t)clamped;
+        //Clamp only what we actively COMMAND. Checked against the real captures: every single
+        //idle frame (b2==0) the factory ever sends has curvature pinned at exactly 32128
+        //regardless of the vehicle's actual curvature at the time - the D2 evidently ignores
+        //the field when intent is 0. So we do the same, and only touch (and clamp) the shared
+        //setCurve global while actually steering - it doubles as the AOG angle-feedback proxy
+        //when idle (main .ino sets setCurve = estCurve), and clamping/overwriting it there would
+        //just make the AOG-displayed angle wrong without matching anything the factory does.
+        if (intendToSteer)
+        {
+            int32_t clamped = (int32_t)setCurve;
+            if (clamped > 32128 + 800) clamped = 32128 + 800;   //factory's own commands stayed within +-600;
+            if (clamped < 32128 - 800) clamped = 32128 - 800;   //measured curvature hit -917..+834 across the captures
+            setCurve = (uint16_t)clamped;
+        }
+        uint16_t txCurve = intendToSteer ? setCurve : 32128;
 
         //0x0CADD21C - Guidance System Command, 10 Hz (100 ms), matching the factory
         //controller's own rate exactly rather than the main loop's 25 Hz - don't burst.
@@ -496,8 +506,8 @@ else if (Brand == 7){
             VBusSendData.id = 0x0CADD21C;
             VBusSendData.flags.extended = true;
             VBusSendData.len = 8;
-            VBusSendData.buf[0] = lowByte(setCurve);
-            VBusSendData.buf[1] = highByte(setCurve);
+            VBusSendData.buf[0] = lowByte(txCurve);
+            VBusSendData.buf[1] = highByte(txCurve);
             VBusSendData.buf[2] = intendToSteer ? 0x01 : 0x00; //copy the factory bytes exactly - not the 0xFD/0xFC used elsewhere
             VBusSendData.buf[3] = 0;
             VBusSendData.buf[4] = 0;
@@ -525,7 +535,10 @@ else if (Brand == 7){
         }
 #endif
 #if XERION_EMULATE_1CFFCE1C
-        if (nowMs - xerionLastTxCe1cMs >= 100)   //10 Hz - only b0 is confirmed, rest is best-effort
+        //Off by default - checked against the raw captures and only b0 (0x31) repeats; the
+        //other 7 bytes are essentially unique on every frame (live data, not a heartbeat), so
+        //this placeholder is fake content. See XERION_NOTES.md before enabling this flag.
+        if (nowMs - xerionLastTxCe1cMs >= 100)   //10 Hz
         {
             xerionLastTxCe1cMs = nowMs;
             CAN_message_t msgCe1c;
@@ -1137,9 +1150,12 @@ void K_Receive()
       {
           if (KBusReceiveData.id == 0x10613173)   //**Xerion K-Bus (cab) engage/disengage button, SA 0x73**
           {
-              uint8_t val = KBusReceiveData.buf[0];
+              uint8_t val = KBusReceiveData.buf[0];   //frame is 1 byte long (LEN=1) - only buf[0] is real data
               uint32_t nowMs = millis();
-              //Edge-triggered with ~200 ms debounce (semantics still need confirming, spec 3.9/9)
+              //Checked against the raw joystick capture: this cleanly alternates 0x01/0x03 with
+              //no chatter (47 transitions, zero repeats) and is only ever sent on change, not
+              //periodically - so it's a clean state report, not bouncy. Debounce kept anyway as
+              //a cheap safety margin.
               if (val != xerionKbusLast && (nowMs - xerionKbusChangeMs) > 200)
               {
                   xerionKbusChangeMs = nowMs;

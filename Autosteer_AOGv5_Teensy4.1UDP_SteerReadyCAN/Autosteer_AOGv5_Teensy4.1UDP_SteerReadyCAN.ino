@@ -69,11 +69,18 @@ String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
 
   //Community tip: look and sound like the factory nav controller on the bus -
   //send every 0x1C frame it sends, at the same rate it sends them, not just
-  //the curvature command. Content for 0x1CFFCE1C is only partially confirmed
-  //(spec §3.7) - flip its flag to 0 individually if it causes trouble.
-  #define XERION_EMULATE_1CEF5A1C 1   //10 Hz constant keep-alive
-  #define XERION_EMULATE_1CFFCE1C 1   //10 Hz, b0 confirmed, rest best-effort
-  #define XERION_EMULATE_1CFFCC1C 1   //1 Hz keep-alive
+  //the curvature command. Checked against the raw captures (see
+  //XERION_NOTES.md): 0x1CEF5A1C, 0x1CFFCC1C and 0x1CFFCD1C are genuinely
+  //constant (bar one unconfirmed byte in CC1C), so replaying them is safe.
+  //0x1CFFCE1C is NOT constant - only b0 repeats, the other 7 bytes are
+  //essentially different on every single frame across all three V-Bus
+  //captures (live data, not a heartbeat) - faking it would send convincing-
+  //looking but entirely made-up values, which seems worse than skipping it,
+  //so it defaults off. Flip individual flags to 0 if a specific frame causes
+  //trouble on a real machine.
+  #define XERION_EMULATE_1CEF5A1C 1   //10 Hz constant keep-alive - confirmed byte-for-byte
+  #define XERION_EMULATE_1CFFCE1C 0   //10 Hz - payload is live/varying, not safe to fake, off by default
+  #define XERION_EMULATE_1CFFCC1C 1   //1 Hz keep-alive - confirmed except the last byte
   #define XERION_EMULATE_1CFFCD1C 1   //1 Hz constant keep-alive
 
   /////////////////////////////////////////////
