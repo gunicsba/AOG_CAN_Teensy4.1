@@ -153,6 +153,7 @@ uint8_t ISORearHitch = 250;     //Variable for hitch height from ISOBUS (0-250 *
 uint8_t KBUSRearHitch = 250;    //Variable for hitch height from KBUS (0-250 *0.4 = 0-100%) - CaseIH tractor bus
 boolean Service = 0;            //Variable for Danfoss Service Tool Mode
 boolean ShowCANData = 0;        //Variable for Showing CAN Data
+boolean steerDiagOn = 0;        //Steering diagnostics CSV mode (Claas, SteerDiag page)
 
 boolean goDown = false, endDown = false , bitState = false, bitStateOld = false;  //CAN Hitch Control
 byte hydLift = 0;
@@ -175,6 +176,7 @@ uint16_t setCurve = 32128;       //Variable for Set Curve to CAN
 uint16_t estCurve = 32128;       //Variable for WAS from CAN
 int16_t FendtEstCurve = 0;       //Variable for WAS from CAN (Fendt Only)
 int16_t FendtSetCurve = 0;       //Variable for Set Curve to CAN CAN (Fendt Only)
+uint16_t claasVehicleLength = 0;    //mm, 0 = Claas angle linear with AOG counts per degree (default). >0 = atan(L x curvature), must match PVED 65112 (EEPROM 76, Service Tool V)
 
 
 //WAS Calabration
@@ -453,7 +455,11 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       Brand = EEPROM.read(70);
       gpsMode = EEPROM.read(72);
     }
-    
+
+    uint16_t eeLength;
+    EEPROM.get(76, eeLength);           //Never written = 0xFFFF -> 0 = linear counts per degree
+    if (eeLength >= 500 && eeLength <= 10000) claasVehicleLength = eeLength;
+
     // for PWM High to Low interpolator
     highLowPerDeg = ((float)(steerSettings.highPWM - steerSettings.lowPWM)) / LOW_HIGH_DEGREES;
          
@@ -509,6 +515,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       else if (Brand == 8) Serial.println("Brand = Cat MT Late (Set Via Service Tool)");
       else if (Brand == 9) Serial.println("Brand = Cat MT Early (Set Via Service Tool)");
       else Serial.println("No Tractor Brand Set, Set Via Service Tool");
+      if (Brand == 0) printClaasVehicleLength();
 
       Serial.println("\r\nGPS Mode:");
       if (gpsMode == 1) Serial.println("GPS Forwarding @ 115200 (Set Via Service Tool)");
@@ -525,6 +532,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       Serial.print(inoVersion);
       Serial.println("\r\nSetup complete, waiting for AgOpenGPS");
       Serial.println("\r\nTo Start AgOpenGPS CANBUS Service Tool Enter 'S'");
+      if (Brand == 0) Serial.println("To Start/Stop Steering Diagnostics CSV Enter 'D'");
 /*
       //Show WAS CAL
       elapsedMicros speedCheck = 0;
@@ -648,6 +656,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
               steeringPosition = (setCurve - 32128 + steerSettings.wasOffset); 
               if (Brand == 3) steerAngleActual = (float)(steeringPosition) / (steerSettings.steerSensorCounts * 10);  //Fendt Only
               else if (Brand == 5) steerAngleActual = (float)(steeringPosition) / (steerSettings.steerSensorCounts * 10);  //Fendt Only
+              else if (Brand == 0 && claasVehicleLength > 0) steerAngleActual = claasCurveToAngle(steeringPosition);  //Claas opt-in: delta = atan(L x kappa)
               else steerAngleActual = (float)(steeringPosition) / steerSettings.steerSensorCounts;
           }
       
@@ -737,9 +746,11 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
         }
     
         if ( b == 'S') {
-          Service = 1; 
+          Service = 1;
           Service_Tool();
         }
+        else if ( b == 'D') steerDiagToggle();  //Steering diagnostics CSV on/off
+        else if (steerDiagOn) steerDiagKey(b);  //Diag marker keys
       }
 
     //--CAN--End-----
@@ -1201,6 +1212,34 @@ if (aogConfig.enableToolLift == 1){
 }
 
   bitStateOld = bitState;
+}
+
+//Claas / PVED curvature -> wheel angle
+//The PVED reports curvature kappa = tan(delta) / L (0.25 km^-1 per bit, 32128 = straight), with L = its parameter 65112.
+//So delta = atan(L x kappa). Only correct once the PVED WAS calibration (65080/65083/65086, 65099/65100, 65112) is real.
+//Opt-in via Service Tool V<mm>, V0 = back to linear AOG counts per degree. In atan mode counts per degree is not used, wasOffset (Zero WAS) still is.
+float claasCurveToAngle(int32_t curveCounts)
+{
+    float kappa = curveCounts * 0.00025f;                          //1/m
+    return atanf(claasVehicleLength * 0.001f * kappa) * (float)CONST_180_DIVIDED_BY_PI;
+}
+
+void printClaasVehicleLength()
+{
+    if (claasVehicleLength == 0)
+    {
+        Serial.println("Claas angle: linear, AOG counts per degree (Service Tool V<mm> = atan mode)");
+        return;
+    }
+    Serial.printf("Claas angle: atan mode, vehicle length %u mm (must match PVED 65112), set AOG counts per degree to %u so Zero WAS works\r\n",
+                  claasVehicleLength, (unsigned)(1.0f / (claasVehicleLength * 0.001f * 0.00025f) / (float)CONST_180_DIVIDED_BY_PI + 0.5f));
+}
+
+void setClaasVehicleLength(uint16_t mm)
+{
+    claasVehicleLength = mm;
+    EEPROM.put(76, claasVehicleLength);
+    printClaasVehicleLength();
 }
 
 //Rob Tillaart, https://github.com/RobTillaart/MultiMap

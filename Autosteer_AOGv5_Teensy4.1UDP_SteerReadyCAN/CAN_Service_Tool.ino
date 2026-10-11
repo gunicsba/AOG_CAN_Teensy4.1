@@ -36,6 +36,16 @@
 //
 //---------------------------------------------------------
 
+//PVED config mode state (P / Y / C), see bottom of this page
+const uint16_t pvedWritable[]      = { 65080, 65083, 65086, 65099, 65100, 65112 };
+const char* const pvedWritableName[] = { "AD1_1000_Left (WAS left)", "AD1_1000_Right (WAS right)", "AD1_Neutral (WAS centre)",
+                                         "True Angle Left", "True Angle Right", "Vehicle Length mm" };
+uint32_t pvedLastRead[6];
+bool pvedKnown[6];
+int8_t pvedPending = -1;        //index of the prepared write
+uint32_t pvedPendingValue = 0;
+uint16_t pvedSent65112 = 0;     //vehicle length written this session, copied to firmware on commit if atan mode is on
+
 void Service_Tool (void) 
 {
   Serial.println("\r\nAgOpenGPS CANBUS Service Tool Mode:");
@@ -62,6 +72,28 @@ void Service_Tool (void)
         else if ( b == 'R') ReadCAN();
         else if ( b == 'S') StopCAN();
         else if ( b == 'Z') setupPVED();
+        else if ( b == 'V')                       //Claas angle mode: V0 linear counts/deg, V<mm> atan(L x kappa), L = PVED 65112
+        {
+          char arg[16];
+          size_t n = Serial.readBytesUntil('\n', arg, sizeof(arg) - 1);
+          arg[n] = 0;
+          uint16_t mm = strtoul(arg, NULL, 10);
+          if (isdigit(arg[0]) && (mm == 0 || (mm >= 500 && mm <= 10000))) setClaasVehicleLength(mm);
+          else
+          {
+            printClaasVehicleLength();
+            Serial.println("V0 = linear (AOG counts per degree), V<mm> = atan mode with that vehicle length, e.g. V2820");
+          }
+        }
+        else if ( b == 'D')                       //Steering diag needs the main loop running, so leave the service tool
+        {
+          steerDiagToggle();
+          if (steerDiagOn)
+          {
+            Service = 0;
+            Serial.println("# Service tool closed, marker keys are now active (S = service tool again)");
+          }
+        }
         else if ( b == 'f') gpsModeOne();
         else if ( b == 'F') gpsModeTwo();
         else if ( b == 'p') gpsModeThree();
@@ -108,6 +140,8 @@ void Help(){
   Serial.println("R = Show CAN Data");
   Serial.println("S = Stop Data");
   Serial.println("Z = Danfoss PVED parameter setup");
+  Serial.println("D = Steering diagnostics CSV on/off (Claas, exits service tool, read only)");
+  Serial.println("V = Claas angle mode: V0 = linear AOG counts per degree, V<mm> = atan(L x curvature), L = PVED 65112");
   Serial.println("    **GPS options**");
   Serial.println("Forwarding Mode: f = 115200, F = 460800");
   Serial.println("Panda Mode: p = 115200, P = 460800\r\n");
@@ -262,16 +296,23 @@ void setupPVED() {
 
     //Reset the CAN filters for config tool only
     V_Bus.setFIFOFilter(REJECT_ALL);
-    V_Bus.setFIFOFilter(0, 0x18EFFD13, EXT);  
+    V_Bus.setFIFOFilter(0, 0x18EFFD13, EXT);
     V_Bus.setFIFOFilter(1, 0x18EFFC13, EXT);
+    V_Bus.setFIFOUserFilter(2, 0x00EF0013, 0x00FF00FF, EXT);  //Any Prop-A frame from the PVED (any priority / DA), e.g. status stream
 
     Serial.println("\r\nAgOpenGPS Danfoss PVED Config Mode:");
     Serial.println("Send X to exit and reset Teensy");
     Serial.println("Send S to print CAN message");
     Serial.println("Send s to stop printing message");
-    Serial.println("Send R to read PVED parameters");
+    Serial.println("Send R to read PVED parameters (save this log = original values, PARAM lines)");
     Serial.println("Send W to change parameter 64007 to 30(Dec) 1E(Hex)");
-    Serial.println("Send C to commit settings to PVED\r\n");
+    Serial.println("Send C to commit settings to PVED");
+    Serial.println("Send P<num>=<raw> to prepare a write, e.g. P65086=512, then Y to send it");
+    Serial.println("    allowed: 65080 AD1 left, 65083 AD1 right, 65086 AD1 neutral, 65099/65100 true angle L/R, 65112 vehicle length");
+    Serial.println("Send T<8 hex bytes> to send a raw frame to the PVED, e.g. T0FAB......");
+    Serial.println("    (status stream request from your dump; write/commit XIDs are blocked here)");
+    Serial.println("Send M<text> to put a marker in the log, e.g. Mleft");
+    Serial.println("Other PVED frames (status stream) are printed as STAT lines, max 4 per second\r\n");
 
     Serial.println("Please power ON PVED valve...");
 
@@ -300,6 +341,16 @@ void setupPVED() {
             else if (e == 'W') WriteParameters();   //Write Basic Parameters
             else if (e == 'C') Commit();            //Commit / Save Data
             else if (e == 'R') ReadParameters = 1;  //Get Basic Parameters
+            else if (e == 'P' || e == 'T' || e == 'M')    //Commands with an argument, read the rest of the line
+            {
+                char arg[48];
+                size_t n = Serial.readBytesUntil('\n', arg, sizeof(arg) - 1);
+                arg[n] = 0;
+                if (e == 'P') pvedPrepareWrite(arg);
+                else if (e == 'T') pvedSendRaw(arg);
+                else Serial.printf("MARK,%lu,%s\r\n", millis(), arg);
+            }
+            else if (e == 'Y') pvedSendWrite();     //Send the prepared parameter write
             else if (e == 'S')
             {
                 showMessage = 1;
@@ -346,9 +397,23 @@ void setupPVED() {
                 if ((ConfigData.buf[2] == 0xAA)) Serial.println("PVED Awake In Operation Mode");
             }
 
-            //Config data reading
-            if ((ConfigData.buf[0] == 0x0F) && ((ConfigData.buf[1] == 0xA1) || (ConfigData.buf[1] == 0xA3))) 
+            //Anything else from the PVED (e.g. StartStopStatus stream), throttled so it stays readable
+            else if (!((ConfigData.buf[0] == 0x0F) && ((ConfigData.buf[1] == 0xA1) || (ConfigData.buf[1] == 0xA3))))
             {
+                static elapsedMillis statPrintTimer;
+                if (showMessage == 0 && statPrintTimer >= 250)
+                {
+                    statPrintTimer = 0;
+                    Serial.printf("STAT,%lu,0x%08lX,LEN %u,", millis(), (unsigned long)ConfigData.id, ConfigData.len);
+                    for (uint8_t i = 0; i < ConfigData.len && i < 8; i++) Serial.printf(" %02X", ConfigData.buf[i]);
+                    Serial.println();
+                }
+            }
+
+            //Config data reading
+            if ((ConfigData.buf[0] == 0x0F) && ((ConfigData.buf[1] == 0xA1) || (ConfigData.buf[1] == 0xA3)))
+            {
+                pvedParamReply(ConfigData.buf[1], ConfigData.len, ConfigData.buf);  //Machine readable PARAM line (backup / restore)
 
                 if ((ConfigData.buf[2] == 0xFC) && (ConfigData.buf[3] == 0x01)) {
                     S16Value = (((int8_t)ConfigData.buf[5] << 8) + ConfigData.buf[4]);
@@ -528,8 +593,8 @@ void setupPVED() {
                     Serial.println("Im not sure ??");
                 }
 
+                Serial.println(" ");
             }
-            Serial.println(" ");
 
         }
 
@@ -825,7 +890,115 @@ void Commit()
     msgC.buf[7] = 0x00;
     V_Bus.write(msgC);
 
+    //In atan mode keep the firmware on the same vehicle length as the PVED, never switch the mode on by itself
+    if (pvedSent65112 != 0)
+    {
+        if (claasVehicleLength > 0) setClaasVehicleLength(pvedSent65112);
+        else Serial.printf("Firmware stays linear (AOG counts per degree). For atan mode send V%u in the service tool\r\n", pvedSent65112);
+        pvedSent65112 = 0;
+    }
+
     delay(1000);
     Serial.println("Commiting data wait 1min, then turn Off PVED valve & restart");
+}
+
+//**************************************************************************************
+// WAS calibration writes (P / Y), raw frames (T) and PARAM backup lines
+
+int8_t pvedWritableIndex(uint16_t num)
+{
+    for (int8_t i = 0; i < 6; i++) if (pvedWritable[i] == num) return i;
+    return -1;
+}
+
+void pvedRequest(uint8_t xid, uint16_t num, uint32_t value)
+{
+    CAN_message_t msg;
+    msg.id = 0x18EF13FD;
+    msg.flags.extended = true;
+    msg.len = 8;
+    msg.buf[0] = 0x0F;
+    msg.buf[1] = xid;               //0xA0 read, 0xA2 write
+    msg.buf[2] = lowByte(num);
+    msg.buf[3] = highByte(num);
+    msg.buf[4] = value;
+    msg.buf[5] = value >> 8;
+    msg.buf[6] = value >> 16;
+    msg.buf[7] = value >> 24;
+    V_Bus.write(msg);
+}
+
+void pvedParamReply(uint8_t xid, uint8_t len, const uint8_t* buf)
+{
+    if (len < 8) return;
+    uint16_t num = buf[2] | (buf[3] << 8);
+    uint32_t raw = buf[4] | (buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
+    Serial.printf("PARAM,%u,%lu,%02X %02X %02X %02X,%s\r\n", num, (unsigned long)raw,
+                  buf[4], buf[5], buf[6], buf[7], xid == 0xA1 ? "A1" : "A3");
+    int8_t i = pvedWritableIndex(num);
+    if (i >= 0 && xid == 0xA1)
+    {
+        pvedLastRead[i] = (num == 65099 || num == 65100) ? raw : (raw & 0xFFFF);
+        pvedKnown[i] = true;
+    }
+}
+
+void pvedPrepareWrite(char* arg)     //"65086=512"
+{
+    char* eq = strchr(arg, '=');
+    if (eq == NULL) { Serial.println("Format: P<num>=<raw value>, e.g. P65086=512"); return; }
+    uint16_t num = strtoul(arg, NULL, 10);
+    uint32_t value = strtoul(eq + 1, NULL, 10);
+    int8_t i = pvedWritableIndex(num);
+    if (i < 0) { Serial.printf("Parameter %u is not allowed here\r\n", num); return; }
+    if (num != 65099 && num != 65100 && value > 0xFFFF) { Serial.println("Value too big for a 16 bit parameter"); return; }
+    if (num == 65112 && (value < 500 || value > 10000)) { Serial.println("Vehicle length must be 500-10000 mm"); return; }
+    if (!pvedKnown[i]) Serial.println("WARNING: original value not read yet - send R first and save the log");
+
+    pvedPending = i;
+    pvedPendingValue = value;
+    Serial.printf("Prepared: %u %s  ", num, pvedWritableName[i]);
+    if (pvedKnown[i]) Serial.printf("%lu", (unsigned long)pvedLastRead[i]);
+    else Serial.print("?");
+    Serial.printf(" -> %lu   Send Y to write, then C to commit\r\n", (unsigned long)value);
+}
+
+void pvedSendWrite()
+{
+    if (pvedPending < 0) { Serial.println("Nothing prepared, use P<num>=<value> first"); return; }
+    uint16_t num = pvedWritable[pvedPending];
+    pvedRequest(0xA2, num, pvedPendingValue);
+    if (num == 65112) pvedSent65112 = pvedPendingValue;
+    Serial.printf("Write sent: %u = %lu, reading back...\r\n", num, (unsigned long)pvedPendingValue);
+    pvedPending = -1;
+    delay(100);
+    pvedRequest(0xA0, num, 0);       //read back, reply shows as PARAM line
+}
+
+void pvedSendRaw(char* arg)          //16 hex digits, spaces allowed
+{
+    CAN_message_t msg;
+    uint8_t n = 0;
+    for (char* p = arg; *p && n < 16; p++)
+    {
+        if (!isxdigit(*p)) continue;
+        uint8_t v = isdigit(*p) ? *p - '0' : (toupper(*p) - 'A' + 10);
+        if (n % 2 == 0) msg.buf[n / 2] = v << 4;
+        else msg.buf[n / 2] |= v;
+        n++;
+    }
+    if (n != 16) { Serial.println("Format: T + 8 bytes in hex, e.g. T0FAB0000000000 00"); return; }
+    if (msg.buf[0] == 0x0F && (msg.buf[1] == 0xA2 || msg.buf[1] == 0xA6))
+    {
+        Serial.println("Write / commit frames are blocked here, use P/Y and C");
+        return;
+    }
+    msg.id = 0x18EF13FD;
+    msg.flags.extended = true;
+    msg.len = 8;
+    V_Bus.write(msg);
+    Serial.print("Sent 0x18EF13FD:");
+    for (uint8_t i = 0; i < 8; i++) Serial.printf(" %02X", msg.buf[i]);
+    Serial.println();
 }
 

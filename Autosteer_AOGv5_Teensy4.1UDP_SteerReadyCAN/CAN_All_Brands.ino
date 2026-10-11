@@ -19,9 +19,7 @@ void CAN_setup (void) {
   V_Bus.enableFIFO();
   V_Bus.setFIFOFilter(REJECT_ALL);
 if (Brand == 0){
-  V_Bus.setFIFOFilter(0, 0x0CAC1E13, EXT);  //Claas Curve Data & Valve State Message
-  V_Bus.setFIFOFilter(1, 0x18EF1CD2, EXT);  //Claas Engage Message
-  V_Bus.setFIFOFilter(2, 0x1CFFE6D2, EXT);  //Claas Work Message (CEBIS Screen MR Models)
+  setClaasVBusFilters();
   CANBUS_ModuleID = 0x1E;
   }
 if (Brand == 1){
@@ -154,6 +152,14 @@ if (Brand == 2){
   delay (300); 
 
 } //End CAN SETUP
+
+//Claas V_Bus filters, also used to restore them when the steering diag mode is switched off
+void setClaasVBusFilters(){
+  V_Bus.setFIFOFilter(REJECT_ALL);
+  V_Bus.setFIFOFilter(0, 0x0CAC1E13, EXT);  //Claas Curve Data & Valve State Message
+  V_Bus.setFIFOFilter(1, 0x18EF1CD2, EXT);  //Claas Engage Message
+  V_Bus.setFIFOFilter(2, 0x1CFFE6D2, EXT);  //Claas Work Message (CEBIS Screen MR Models)
+}
 
 
 //---Send V_Bus message
@@ -373,16 +379,10 @@ void VBus_Receive()
               if (engageCAN == 1) digitalWrite(PWM2_RPWM, 1);       
             }
   
-            else if ((VBusReceiveData.buf[0]) == 39 && (VBusReceiveData.buf[2]) == 243)   //Balazs Arion 650 
-            {
-              engageCAN = bitRead(VBusReceiveData.buf[1],0);
-              Time = millis();
-              digitalWrite(engageLED,HIGH); 
-              relayTime = ((millis() + 1000));
-              //*****Turn saftey valve ON**********
-              if (engageCAN == 1) digitalWrite(PWM2_RPWM, 1);       
-            }
-    
+            //Balazs Arion 650: 39,15,243,255,255,255,counter,checksum arrives every 1 s with byte 1 always 15.
+            //It is a heartbeat, there is no CAN engage button. Reading it as engage kept the button "held",
+            //re-engaged after every steering wheel override and never switched the safety valve off. Do not use.
+
             else if ((VBusReceiveData.buf[1])== 0 && (VBusReceiveData.buf[2])== 125) //Tony Non MR Models? Ryan Mod to bit read engage bit
             {
                engageCAN = bitRead(VBusReceiveData.buf[0],2);
@@ -402,6 +402,9 @@ void VBus_Receive()
              workCAN = bitRead(VBusReceiveData.buf[6],0);
             }
           }
+
+          //**Steering diagnostics CSV (read only)**
+          if (steerDiagOn) steerDiagRx(VBusReceiveData);
         }//End Brand == 0
 
         else if (Brand == 1)
