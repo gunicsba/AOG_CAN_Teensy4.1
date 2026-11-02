@@ -385,13 +385,18 @@ static void apiStatus()
     j.close();
 
     j.obj("imu");
-    j.str("type", useBNO08x ? "BNO08x" : useTM171 ? "TM171" : "");
+    j.str("type", useBNO08x ? "BNO08x" : useTM171 ? "TM171" : "");   // the one feeding AgOpenGPS
+    j.bo("bnoFound", bnoFound);
+    j.bo("tmFound", tm171Found);
+    j.i("pref", imuPref);
     j.bo("yAxis", steerConfig.IsUseY_Axis);
-    if (useTM171)
+    if (useTM171)       { j.num("roll", RollV.fValue, 2); j.num("pitch", PitchV.fValue, 2); j.num("yaw", YawV.fValue, 2); }
+    else if (useBNO08x) { j.num("roll", roll / 10.0, 2);  j.num("pitch", pitch / 10.0, 2);  j.num("yaw", yaw / 10.0, 2); }
+    if (tm171Found)                              // the TM171's own values, also while the BNO08x is in use
     {
-        j.num("roll", RollV.fValue, 2);
-        j.num("pitch", PitchV.fValue, 2);
-        j.num("yaw", YawV.fValue, 2);
+        j.num("tmRoll", RollV.fValue, 2);
+        j.num("tmPitch", PitchV.fValue, 2);
+        j.num("tmYaw", YawV.fValue, 2);
         j.bo("fresh", TM171lastData < 500);
         j.u("rate", TM171rpyRate);
         j.u("crcErr", TM171crcErrors);
@@ -399,12 +404,6 @@ static void apiStatus()
         if (TM171statusMs && now - TM171statusMs < 5000) { j.num("tempC", TemperatureV.fValue, 1); j.i("qos", qos); }
         tm171SettingJson(j);
         tm171CalJson(j);
-    }
-    else if (useBNO08x)
-    {
-        j.num("roll", roll / 10.0, 2);
-        j.num("pitch", pitch / 10.0, 2);
-        j.num("yaw", yaw / 10.0, 2);
     }
     j.close();
 
@@ -510,7 +509,17 @@ static void apiImuPost(const char* body)
 {
     char act[16], v[16];
     if (!formValue(body, "act", act, sizeof(act))) { webReplyError(400, "no act"); return; }
-    if (!useTM171) { webReplyError(409, "no TM171 found at start-up"); return; }
+    if (!strcmp(act, "select"))                  // which IMU feeds AgOpenGPS (zBoard.ino)
+    {
+        if (!formValue(body, "imu", v, sizeof(v)) || (strcmp(v, "bno") && strcmp(v, "tm171"))) { webReplyError(400, "imu: bno or tm171"); return; }
+        if (webEngaged()) { webReplyError(409, "autosteer is engaged - disengage it first"); return; }
+        if (!bnoFound || !tm171Found) { webReplyError(409, "only one IMU was found at start-up"); return; }
+        imuPrefSave(!strcmp(v, "bno") ? 1 : 2);
+        webLog("[web] IMU in use: %s (saved)", useBNO08x ? "BNO08x" : "TM171");
+        webReplyJson(200, "{\"ok\":true}");
+        return;
+    }
+    if (!tm171Found) { webReplyError(409, "no TM171 found at start-up"); return; }
     const char* why = "";
     if (!strcmp(act, "setread")) tm171SettingRead();
     else if (!strcmp(act, "setwrite"))
@@ -784,7 +793,7 @@ void webSetup()
 void webLoop()
 {
     webRates();
-    if (useTM171) tm171Loop(!webEngaged() && !webMoving());
+    if (tm171Found) tm171Loop(!webEngaged() && !webMoving());
     pvedWebLoop(webMoving());
     if (!webRunning) return;
     if (rq.state == WEB_IDLE)

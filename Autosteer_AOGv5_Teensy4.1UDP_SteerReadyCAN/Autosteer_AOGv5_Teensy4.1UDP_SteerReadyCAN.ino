@@ -231,8 +231,11 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
   HardwareSerial* SerialIMU = &Serial5;   //IMU BNO-085
 
   // booleans to see what mode BNO08x
-  bool useBNO08x = false;
+  bool useBNO08x = false;          // the IMU that feeds AgOpenGPS (imuSelect, zBoard.ino)
   bool useTM171 = false;
+  bool bnoFound = false;           // found at start-up: both keep running, the web page chooses which one is used
+  bool tm171Found = false;
+  uint8_t imuPref = 0;             // 1 = BNO085, 2 = TM171, else BNO085 first (EEPROM 204, web page IMU tab)
   elapsedMillis TM171lastData;
 
 
@@ -416,7 +419,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
             // Use GameRotationVector
             bno08x.enableGameRotationVector(GYRO_LOOP_TIME); 
   
-            useBNO08x = true;
+            bnoFound = true;
           }
           else
           {
@@ -428,10 +431,10 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
           Serial.println("Error = 4");
           Serial.println("i2c BNO08x not Connected or Found"); 
         }
-        if (useBNO08x) break;
+        if (bnoFound) break;
       }
 
-      if (!useBNO08x && SerialImu)
+      if (SerialImu)                  //Also with a BNO08x: both can be fitted, the web page chooses (imuSelect)
       {
           static elapsedMillis rvcimuTimer = 0;
           Serial.println("\r\nChecking for serial TM171");
@@ -439,14 +442,17 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
               TM171process();
               if(TM171lastData <= 80) {
                 Serial.println("Received data from TM171");
-                useTM171 = true;
-                imuHandler();
+                tm171Found = true;
               } else {
                 Serial.println("No fresh data from TM171");
               }
         
-          if (!useTM171)  Serial.println("TM171 not Connected or Found");
+          if (!tm171Found)  Serial.println("TM171 not Connected or Found");
       }
+
+      imuPrefLoad();                  //Which IMU feeds AgOpenGPS when both are found (zBoard.ino)
+      imuSelect();
+      if (useTM171) imuHandler();
   
     EEPROM.get(0, EEread);     // read identifier
       
@@ -782,14 +788,9 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
     //--CAN--End-----
 
     //**GPS**
-      if (useBNO08x)
-      {
-          Read_IMU();
-      }
-      else if (useTM171 )
-      {
-        TM171process();
-      }
+      //Every IMU found keeps running; the one in use (useBNO08x / useTM171, imuSelect) feeds AgOpenGPS
+      if (bnoFound) Read_IMU();
+      if (tm171Found) TM171process();
       
       if (useTM171 && imuTimer > 40 && imuTrigger)
       {

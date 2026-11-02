@@ -78,6 +78,14 @@ progress{width:100%;height:14px}
 .ll .t{color:var(--mute);flex:none;font-variant-numeric:tabular-nums;width:86px}
 ul.note{margin:6px 0 0;padding-left:20px}
 .tw{overflow-x:auto}
+.swrow{display:flex;align-items:center;gap:12px;margin:6px 0}
+.swrow span.on{font-weight:700;color:var(--acc)}
+.switch{position:relative;display:inline-block;width:54px;height:28px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.switch .knob{position:absolute;inset:0;cursor:pointer;background:var(--soft);border:1px solid var(--line);border-radius:999px;transition:.2s}
+.switch .knob:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:var(--acc);border-radius:50%;transition:.2s}
+.switch input:checked+.knob:before{transform:translateX(26px)}
+.switch input:disabled+.knob{opacity:.45;cursor:default}
 table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:middle}
 th{color:var(--mute);font-weight:600;font-size:12.5px}
@@ -178,6 +186,10 @@ input[type=text]{font:inherit;font-family:var(--mono);padding:6px 8px;border:1px
 </section>
 
 <section id="t-imu" class="hidden">
+<div class="card" id="imuSelCard" style="margin-bottom:12px"><h2>IMU in use</h2>
+ <div class="swrow"><span id="swBno">BNO085</span><label class="switch"><input type="checkbox" id="imuSw" data-lock="e"><span class="knob"></span></label><span id="swTm">TM171</span></div>
+ <p class="note" id="imuSelTxt"></p>
+</div>
 <div class="card hidden" id="imuNone"><h2>IMU</h2><p class="note" id="imuNoneTxt"></p></div>
 <div id="imuTm" class="hidden">
 <div class="grid">
@@ -396,10 +408,10 @@ function render(s){
  if(g.gga){pill("gFix",FIX[g.fix]||g.fix,g.fix==="4"?"ok":g.fix==="0"?"bad":"warn");set("gSats",g.sats+" / "+g.hdop);set("gAge",g.age?g.age+" s":"–");}
  else set("gFix",g.mode>=3?"no GGA from the receiver":"read by AgIO (forwarding mode)");
  vis("gSatsR",g.gga);vis("gAgeR",g.gga);
- const i=s.imu;set("iType",i.type||"none found at start-up");
- vis("iRPR",!!i.type);vis("iYawR",!!i.type);vis("iRateR",i.type==="TM171");
+ const i=s.imu;set("iType",i.type?i.type+(i.bnoFound&&i.tmFound?" (both found)":""):"none found at start-up");
+ vis("iRPR",!!i.type);vis("iYawR",!!i.type);vis("iRateR",!!i.tmFound);
  if(i.type){set("iRP",fx(i.roll,2)+"° / "+fx(i.pitch,2)+"°");set("iYaw",fx(i.yaw,1)+"°");}
- if(i.type==="TM171")pill("iRate",i.rate+" Hz",i.fresh&&i.rate?"ok":"bad");
+ if(i.tmFound)pill("iRate",i.rate+" Hz (TM171)",i.fresh&&i.rate?"ok":"bad");
  set("mFw",s.ver);set("mBuilt",s.built);set("mUp",dur(s.up));
  set("mIp",s.ip+" / "+(s.link?"link up":"no link"));if(s.ports){const pn=v=>v?"Serial"+v:"none";set("mPorts","GNSS "+pn(s.ports.gnss)+" · IMU "+pn(s.ports.imu)+" · radio "+pn(s.ports.radio));}set("mCpu",fx(s.cpuC,1)+" °C");
  set("fRun",s.ver+", built "+s.built);set("fWeb",s.web.req+" / "+s.web.err+" / "+s.web.drop);
@@ -468,10 +480,23 @@ function tsFill(s){$("tsGyro").checked=!!s.gyro;$("tsAcc").checked=!!s.acc;$("ts
  $("tsStatus").checked=!!s.status;$("tsBoot").value=String(s.boot||0);$("tsAccG").value=(s.accGain/100).toFixed(2);$("tsMagG").value=(s.magGain/100).toFixed(2);
  $("tsSilent").value=s.silent||0;if(s.odr!==undefined)odrSet(s.odr);tsDirty=false;}
 $("tsForm").addEventListener("input",()=>{tsDirty=true;});
+function renderImuSel(i){
+ const both=i.bnoFound&&i.tmFound,sw=$("imuSw");
+ if(document.activeElement!==sw||!sw.dataset.busy)sw.checked=i.type==="TM171";
+ sw.dataset.off=both?"":"1";sw.disabled=!both||sw.dataset.locked==="1";
+ $("swBno").className=i.type==="BNO08x"?"on":"";$("swTm").className=i.type==="TM171"?"on":"";
+ set("imuSelTxt",both?"Both found. Roll, pitch and heading to AgOpenGPS come from the "+(i.type==="TM171"?"TM171":"BNO085")+"; the other keeps running (the TM171's settings and calibration stay usable). The choice is saved and taken at once; it can only be changed with autosteer off."
+  :i.type?"Only the "+(i.type==="TM171"?"TM171":"BNO085")+" was found at start-up: nothing to choose.":"No IMU was found at start-up.");}
+$("imuSw").addEventListener("change",async()=>{
+ const sw=$("imuSw"),to=sw.checked?"tm171":"bno";
+ if(!confirm("Use the "+(sw.checked?"TM171":"BNO085")+" for roll, pitch and heading?\n\nAgOpenGPS gets the other IMU's values at once: check roll and heading afterwards.")){sw.checked=!sw.checked;return;}
+ sw.dataset.busy="1";
+ try{const j=await post("/api/imu","act=select&imu="+to);if(!j.ok){alert("Not changed: "+j.error);sw.checked=!sw.checked;}}catch(e){sw.checked=!sw.checked;}
+ delete sw.dataset.busy;pollStatus();});
 function renderImu(s){
- const i=s.imu,tm=i.type==="TM171";vis("imuTm",tm);vis("imuNone",!tm);
+ const i=s.imu,tm=!!i.tmFound;vis("imuTm",tm);vis("imuNone",!tm);renderImuSel(i);
  if(!tm){set("imuNoneTxt",i.type==="BNO08x"?"BNO08x on I2C: nothing to set up here. The settings and calibrations on this tab are for the TM171.":"No IMU was found at start-up. The TM171 ("+(s.ports.imu?"Serial"+s.ports.imu:"no port set")+", 115200) or the BNO08x (I2C 0x4A / 0x4B) is looked for once, when the Teensy starts. The port is set in Tractor & GPS.");return;}
- set("tRP",fx(i.roll,2)+"° / "+fx(i.pitch,2)+"°");set("tYaw",fx(i.yaw,2)+"°");
+ set("tRP",fx(i.tmRoll,2)+"° / "+fx(i.tmPitch,2)+"°");set("tYaw",fx(i.tmYaw,2)+"°");
  pill("tRate",i.rate+" Hz",i.fresh&&i.rate?"ok":"bad");set("tId",String(i.id));set("tCrc",String(i.crcErr));
  vis("tTempR",i.tempC!==undefined);if(i.tempC!==undefined)set("tTemp",fx(i.tempC,1)+" °C / "+i.qos);
  set("tAxis",i.yAxis?"on":"off");

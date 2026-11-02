@@ -55,7 +55,7 @@ void Read_IMU()
     {
       lastGyroTime = IMU_currentTime;
       
-      if(useBNO08x)
+      if(bnoFound)
       {
         if (bno08x.dataAvailable() == true)
         {

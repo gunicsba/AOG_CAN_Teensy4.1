@@ -354,7 +354,7 @@ static void tm171SettingGot(const uint8_t* p)
 // The web page's form. Returns false with the reason.
 bool tm171SettingWrite(const TmSetForm& f, const char** why)
 {
-    if (!useTM171)            { *why = "no TM171 found at start-up"; return false; }
+    if (!tm171Found)          { *why = "no TM171 found at start-up"; return false; }
     if (!tmSetValid)          { *why = tmSetOdd ? "settings layout not recognised; writing is disabled" : "read the settings from the TM171 first"; return false; }
     if (f.accGain < 1 || f.accGain > 2000 || f.magGain < 1 || f.magGain > 2000) { *why = "gain out of range (0.01 - 20.00)"; return false; }
     if (f.silent > 65)        { *why = "power-on silent time: 0 - 65 s"; return false; }
@@ -522,7 +522,7 @@ bool tm171CalStart(const char* code, uint32_t p2, uint32_t p3, bool engaged, boo
     for (uint8_t i = 0; i < TM_CAL_N; i++) if (!strcmp(tmCalDefs[i].code, code)) k = i;
     if (k < 0)       { *why = "unknown calibration"; return false; }
     const TmCalDef& d = tmCalDefs[k];
-    if (!useTM171)   { *why = "no TM171 found at start-up"; return false; }
+    if (!tm171Found) { *why = "no TM171 found at start-up"; return false; }
     const bool stopper = !strcmp(code, "gyroStop") || !strcmp(code, "magClear") || !strcmp(code, "magClearTmp") || !strcmp(code, "headStop");
     if (engaged && !stopper)  { *why = "autosteer is engaged - disengage it first"; return false; }
     if (d.still && moving)    { *why = "the tractor is moving - stop first"; return false; }

@@ -12,6 +12,7 @@
 
 #define BOARD_EE_ADDR  200        // magic, GNSS, IMU, radio
 #define BOARD_EE_MAGIC 0x5B
+#define IMU_PREF_ADDR  204        // 1 = BNO085, 2 = TM171, anything else (0xFF when never written) = BNO085 first
 
 HardwareSerial* boardSerial(uint8_t n)
 {
@@ -61,6 +62,35 @@ void boardPortsLoad()
     if (portImu) Serial.printf("Serial%u", portImu); else Serial.print("none");
     Serial.print(", RTK radio ");
     if (portRadio) Serial.printf("Serial%u\r\n", portRadio); else Serial.println("none");
+}
+
+// ---------------------------------------------------------------- which IMU feeds AgOpenGPS
+// Both a BNO08x (I2C) and a TM171 (serial) can be fitted. Both keep running when found (the TM171's settings and
+// calibration stay usable); the one chosen on the web page (IMU tab) gives roll / pitch / heading to AgOpenGPS.
+// Without a choice it is the BNO08x first, as before. If the chosen one is not there, the other is used.
+void imuPrefLoad()
+{
+    imuPref = EEPROM.read(IMU_PREF_ADDR);
+    if (imuPref != 1 && imuPref != 2) imuPref = 0;
+}
+
+void imuSelect()
+{
+    const bool wantTm = imuPref == 2 || (imuPref != 1 && !bnoFound);
+    useTM171  = tm171Found && (wantTm || !bnoFound);
+    useBNO08x = bnoFound && !useTM171;
+    imuTrigger = false;
+    Serial.printf("IMU in use: %s%s\r\n", useBNO08x ? "BNO08x" : useTM171 ? "TM171" : "none",
+                  bnoFound && tm171Found ? " (both found, chosen on the web page IMU tab)" : "");
+}
+
+// From the web page (autosteer off): saved, and taken at once
+void imuPrefSave(uint8_t pref)
+{
+    imuPref = pref;
+    EEPROM.update(IMU_PREF_ADDR, pref);
+    imuSelect();
+    if (useTM171) imuHandler();
 }
 
 // From the web page; the caller restarts the Teensy

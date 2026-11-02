@@ -28,7 +28,7 @@ The Teensy serves its own web page on port 80: `http://<subnet>.126/`, where the
 |---|---|
 | Status | Steering (brand, valve state, wheel angle, curve, switches), AgOpenGPS connection, GPS data rate and fix (fix only in Panda mode), IMU, module (version, IP, CPU temperature) |
 | Tractor & GPS | Tractor brand (0-9) and GPS mode (Forwarding / Panda, 115200 / 460800), the same settings as the serial service tool (`S`, then `0`-`9`, `f` / `F` / `p` / `P`). Saved in the EEPROM (70, 72), and the Teensy restarts. For Claas, the wheel angle mode (linear or atan with vehicle length L, the same as service tool `V`, EEPROM 76, no restart). Board serial ports of the GNSS, the TM171 and the RTK radio (EEPROM 200-203, restart): this board GNSS Serial3 / IMU Serial5 / radio Serial7 (default), AiO v4.x GNSS Serial7 / IMU Serial5 / radio Serial3. Serial1, 2 and 4 are not offered (CAN2, the work switch and remote inputs, the engage LED) |
-| IMU | TM171 settings and calibrations (below). A BNO08x has nothing to set |
+| IMU | TM171 settings and calibrations (below). A BNO08x has nothing to set. If both a BNO08x (I2C) and a TM171 (serial) are found at start-up, both keep running and a switch chooses which one gives roll / pitch / heading to AgOpenGPS (taken at once, autosteer off, saved in EEPROM 204). Without a choice the BNO08x is used first, as before |
 | PVED | Danfoss PVED-CL parameters: read, write, commit, the Claas hack, backup and restore, experimental valve auto-calibration, and the PVED's other frames (below) |
 | Firmware | Update from a `.hex` file (Arduino IDE: Sketch > Export Compiled Binary), and restart |
 | Messages | Firmware messages (TM171 replies, the frames sent and received, web actions). The same lines are printed on USB serial |
