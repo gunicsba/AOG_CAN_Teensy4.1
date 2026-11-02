@@ -46,6 +46,12 @@ void steerDiagToggle()
     return;
   }
 
+  if (pvedWebOn)                // both need V-Bus FIFO filter 7 (zPved.ino)
+  {
+    Serial.println("# Steer diag: close the PVED session on the web page first");
+    return;
+  }
+
   dg301.seen = dg105.seen = dgE2D2.seen = dg131B.seen = dgCCVS.seen = false;
   steerDiagMark = 0;
   steerDiagDlcWarned = 0;

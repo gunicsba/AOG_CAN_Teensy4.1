@@ -27,6 +27,8 @@ char imuRoll[6];
 char imuPitch[6];
 char imuYawRate[6];
 
+uint32_t ggaLastMs = 0;     // last GGA parsed (Panda mode), for the web page
+
 // If odd characters showed up.
 void errorHandler()
 {
@@ -35,6 +37,8 @@ void errorHandler()
 
 void GGA_Handler() //Rec'd GGA
 {
+    ggaLastMs = millis() | 1;
+
     // fix time
     parser.getArg(0, fixTime);
 

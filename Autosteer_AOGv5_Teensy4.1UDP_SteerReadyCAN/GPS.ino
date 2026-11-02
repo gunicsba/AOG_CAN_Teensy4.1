@@ -1,9 +1,14 @@
 
-#define GPS Serial3
+//Serial ports of the GNSS receiver, the IMU and the RTK radio: chosen on the web page (board setup, zBoard.ino),
+//set by boardPortsLoad() at start-up. Defaults = this board: GNSS Serial3, IMU Serial5, radio Serial7.
+uint8_t portGnss = 3, portImu = 5, portRadio = 7;   //0 = none (IMU, radio)
+HardwareSerial* gpsPort = &Serial3;
+HardwareSerial* radioPort = &Serial7;               //nullptr = no radio
+#define GPS (*gpsPort)
 char rxbuffer[512];         //Extra serial rx buffer
 char txbuffer[512];         //Extra serial tx buffer
 
-#define RadioRTK Serial7
+#define RadioRTK (*radioPort)
 #define RadioBaudRate 115200
 char RTKrxbuffer[512];      //Extra serial rx buffer
 
@@ -12,6 +17,8 @@ int count=0;
 bool stringComplete = false;
 
 int test = 0;
+
+uint32_t gpsRxBytes = 0, ntripRxBytes = 0, radioRxBytes = 0;   //Byte counters for the web page (zWeb.ino)
 
 //**************************************************************
 
@@ -22,8 +29,11 @@ void GPS_setup()
   GPS.addMemoryForRead(rxbuffer, 512);
   GPS.addMemoryForWrite(txbuffer, 512);
 
-  RadioRTK.begin(RadioBaudRate);
-  RadioRTK.addMemoryForRead(RTKrxbuffer, 512);
+  if (radioPort)
+  {
+    RadioRTK.begin(RadioBaudRate);
+    RadioRTK.addMemoryForRead(RTKrxbuffer, 512);
+  }
 
   // the dash means wildcard
   parser.setErrorHandler(errorHandler);
@@ -106,6 +116,7 @@ void Panda_GPS()
 {
     while (GPS.available())
     {
+        gpsRxBytes++;
         parser << GPS.read();
     }
 }
@@ -117,6 +128,7 @@ void Forward_GPS()
   while (GPS.available())
   {
     char c = GPS.read();
+    gpsRxBytes++;
     nmeaBuffer[count++] = c;
     if(c == '\n')stringComplete = true;
     if(count == 200 || stringComplete == true)break;
@@ -144,7 +156,9 @@ void Forward_Ntrip()
     
     if (NtripSize) 
     {
+        if (NtripSize > (int)sizeof(NtripData)) NtripSize = sizeof(NtripData);
         NtripUdp.read(NtripData, NtripSize);
+        ntripRxBytes += NtripSize;
         //Serial.print("Ntrip Data ="); 
         //Serial.write(NtripData, sizeof(NtripData)); 
         //Serial.write(10);
@@ -153,9 +167,10 @@ void Forward_Ntrip()
     }
 
 //Check for Radio RTK
-    if (RadioRTK.available())
+    if (radioPort && RadioRTK.available())
     {
         GPS.write(RadioRTK.read());
+        radioRxBytes++;
     }
 }
     

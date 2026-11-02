@@ -43,9 +43,13 @@
 //Arduino Hitch settings must be enableded and sent to module
 //"Invert Relays" Uses section 1 to trigger hitch (Again temporary)
 
+//Web page (zWeb.ino): http://<subnet>.126/ - status, tractor brand & GPS mode (same as the service tool),
+//Claas wheel angle mode, TM171 settings & calibration, firmware update over the network (zOTA.ino)
+//Ported from renatorgr/Boards v4.5_AiO_WEB (GPL-3.0-or-later, see COPYING)
+
 //----------------------------------------------------------
 
-String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 04.05.2024");
+String inoVersion = ("\r\nAgOpenGPS Tony UDP CANBUS Ver 02.11.2026 web");
 
   ////////////////// User Settings /////////////////////////  
 
@@ -100,6 +104,8 @@ elapsedMillis tempChecker;
 //----Teensy 4.1 Ethernet--Start---------------------
   #include <NativeEthernet.h>
   #include <NativeEthernetUdp.h>
+  #include "zNet.h"                   //Network stack polled from loop() (zWeb.ino)
+  #include "zWeb.h"                   //Web page (zWeb.ino, zOTA.ino, TM171.ino)
 
     struct ConfigIP {
         uint8_t ipOne = 192;
@@ -126,6 +132,8 @@ elapsedMillis tempChecker;
   // An EthernetUDP instance to let us send and receive packets over UDP
   EthernetUDP Udp;
   EthernetUDP NtripUdp;         
+
+  uint32_t aogLastMs = 0;       //Last PGN 254 from AgOpenGPS (web page)
 
 //----Teensy 4.1 Ethernet--End---------------------
 
@@ -341,6 +349,13 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
 
 //*******************************************************************************
  
+  //Half a second wait at the very beginning of the boot: the Teensy core calls this right after the
+  //clocks and SysTick are set up, before USB, the C++ constructors and setup() (so delay() works here)
+  extern "C" void startup_middle_hook(void)
+  {
+    delay(500);
+  }
+
   void setup()
   {    
     delay(500);                         //Small delay so serial can monitor start up
@@ -367,7 +382,8 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
     ; // wait for serial port to connect. Needed for native USB port only
   }*/
 
-      TM171setup();
+      boardPortsLoad();               //Serial ports of GNSS / IMU / radio (web page board setup, zBoard.ino)
+      if (SerialImu) TM171setup();    //No IMU port: BNO08x on I2C only
       delay(200);
 
 
@@ -415,7 +431,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
         if (useBNO08x) break;
       }
 
-      if (!useBNO08x)
+      if (!useBNO08x && SerialImu)
       {
           static elapsedMillis rvcimuTimer = 0;
           Serial.println("\r\nChecking for serial TM171");
@@ -472,6 +488,10 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
         Serial.println("\r\nEthernet cable is not connected - Who cares we will start ethernet anyway.");
       }  
 
+      // Socket buffers of 8 KB (the library's are 2 KB) for the web page: 8 sockets x 2 x 8 KB + a 96 KB stack heap, in RAM2
+      Ethernet.setStackHeap(96 * 1024);
+      Ethernet.setSocketSize(8 * 1024);
+
       Ethernet.begin(mac,0);          // Start Ethernet with IP 0.0.0.0
 
       //grab the ip from EEPROM
@@ -490,6 +510,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
     
       Udp.begin(localPort);
       NtripUdp.begin(NtripPort);
+      webSetup();                     //Web page on port 80 (zWeb.ino)
 
       GPS_setup();
 
@@ -533,6 +554,9 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
       Serial.println("\r\nSetup complete, waiting for AgOpenGPS");
       Serial.println("\r\nTo Start AgOpenGPS CANBUS Service Tool Enter 'S'");
       if (Brand == 0) Serial.println("To Start/Stop Steering Diagnostics CSV Enter 'D'");
+      Serial.print("Web page: http://"); Serial.print(Ethernet.localIP()); Serial.println("/");
+
+      netPollFromLoop();              //From now on the network stack runs from loop(), not from a timer interrupt (zNet.h)
 /*
       //Show WAS CAL
       elapsedMicros speedCheck = 0;
@@ -670,8 +694,10 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
           else mappedWAS = multiMap<float>(steerAngleActual, inputWAS, outputWAS, 21);
           steerAngleActual = mappedWAS;
       
+          if (pvedWebOn) watchdogTimer = WATCHDOG_FORCE_VALUE;   //PVED tab session open (zPved.ino): no autosteer
+
           if (watchdogTimer < WATCHDOG_THRESHOLD)
-          { 
+          {
             //We are good to steer
             digitalWrite(PWM2_RPWM, 1);       
       
@@ -706,7 +732,7 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
 
         //-------CAN Set Curve ---------------
 
-        VBus_Send();
+        if (!pvedWebQuiet) VBus_Send();   //Paused while the PVED tab session asks for it (zPved.ino)
 
         //-------CAN Hitch Control--------------- 
     
@@ -789,6 +815,10 @@ boolean intendToSteer = 0;        //Do We Intend to Steer?
           udpSteerRecv(packetSize);
         }
 
+     //Network stack and web page (zWeb.ino), also runs the TM171 settings / calibration
+        netPoll();
+        webLoop();
+
         if (encEnable)
         {
           thisEnc = digitalRead(REMOTE_PIN);
@@ -813,6 +843,7 @@ void udpSteerRecv(int sizeToRead)
   {
     if (udpData[3] == 0xFE)  //254
     {
+      aogLastMs = millis();
       gpsSpeed = ((float)(udpData[5] | udpData[6] << 8))*0.1;
 
       guidanceStatus = udpData[7];

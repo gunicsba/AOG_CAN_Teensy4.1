@@ -338,6 +338,8 @@ void VBus_Receive()
     CAN_message_t VBusReceiveData;
     if (V_Bus.read(VBusReceiveData)) {
 
+        if (pvedWebOn && pvedWebRx(VBusReceiveData)) return;   //PVED service answers for the web page PVED tab (zPved.ino)
+
         if (Brand == 0)
         {
           //**Current Wheel Angle & Valve State**

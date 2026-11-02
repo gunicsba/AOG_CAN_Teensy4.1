@@ -53,7 +53,8 @@ void Service_Tool (void)
   
   while (Service == 1) 
   {
-  
+      netPoll();                //Keep the network stack alive (it runs from loop() now, zNet.h)
+
       if (Serial.available())   // Read Data From Serail Monitor 
       {    
         byte b = Serial.read();
@@ -329,6 +330,8 @@ void setupPVED() {
 
     while (configPVED == true)
     {
+        netPoll();                      //Keep the network stack alive (it runs from loop() now, zNet.h)
+
         if (Serial.available())         // Read Data From Serail Monitor 
         {
             byte e = Serial.read();
